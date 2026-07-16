@@ -1,8 +1,8 @@
 # agent-test-bench Integration
 
-Read-only source repository inspected:
+Read-only source repository:
 
-`C:\Users\29068\Desktop\agent-test-bench`
+`AGENT_TEST_BENCH_ROOT` or a sibling checkout such as `../agent-test-bench`.
 
 Relevant findings:
 

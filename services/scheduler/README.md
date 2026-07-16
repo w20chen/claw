@@ -3,6 +3,8 @@
 Run:
 
 ```bash
+python -m pip install -e '.[dev]'
+export PYTHONPATH=src
 python -m agent_scheduler.main --host 127.0.0.1 --port 8765
 ```
 
@@ -15,6 +17,9 @@ Configuration uses environment variables:
 - `AGENT_SCHEDULER_ADMISSION_WAIT_MS`
 - `AGENT_SCHEDULER_TOOL_PROFILES`
 - `AGENT_SCHEDULER_TOKEN`
+
+`AGENT_SCHEDULER_CONFIG` is not consumed by the sidecar; use the environment
+variables above.
 
 Runtime inspection:
 

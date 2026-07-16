@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_BENCH_ROOT = Path(r"C:\Users\29068\Desktop\agent-test-bench")
+DEFAULT_BENCH_ROOT = Path(os.getenv("AGENT_TEST_BENCH_ROOT", ROOT.parent / "agent-test-bench"))
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -24,7 +24,12 @@ def main() -> None:
             "then validate/import the produced traces."
         )
     )
-    parser.add_argument("--bench-root", type=Path, default=DEFAULT_BENCH_ROOT)
+    parser.add_argument(
+        "--bench-root",
+        type=Path,
+        default=DEFAULT_BENCH_ROOT,
+        help="agent-test-bench checkout. Defaults to AGENT_TEST_BENCH_ROOT or ../agent-test-bench.",
+    )
     parser.add_argument("--python", default=sys.executable, help="Python executable used for agent-test-bench.")
     parser.add_argument("--dry-run", action="store_true", help="Print the delegated command without running it.")
     parser.add_argument("--no-validate", action="store_true", help="Skip post-run trace validation.")

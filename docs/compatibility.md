@@ -1,23 +1,36 @@
 # Compatibility
 
-## Local Checks
+## Linux Default
 
-- `node --version`: `v24.18.0`
-- `npm.cmd --version`: `11.16.0`
-- Official OpenClaw installed with `npm.cmd install -g openclaw@latest`.
-- Official CLI path: `C:\Users\29068\AppData\Roaming\npm\openclaw.cmd`.
-- `openclaw.cmd --version`: `OpenClaw 2026.7.1 (2d2ddc4)`.
-- `openclaw.cmd plugins list`: succeeds and loads stock plugins.
-- `openclaw.cmd plugins install --link C:\Users\29068\Desktop\claw\packages\openclaw-plugin`: succeeds.
-- `openclaw.cmd plugins inspect hardware-scheduler --runtime --json`: succeeds
-  with `hookCount: 4` and typed hooks:
-  - `before_tool_call`
-  - `after_tool_call`
-  - `model_call_started`
-  - `model_call_ended`
-- Bare `openclaw` in PowerShell may be blocked by the generated `openclaw.ps1`
-  shim under the current script execution policy. Use `openclaw.cmd` unless the
-  user explicitly chooses to relax PowerShell execution policy.
+The supported operator path assumes Linux with:
+
+- Python 3.12
+- Node.js 24 and npm
+- OpenClaw 2026.7.1 or newer
+- Docker or Podman only when running `agent-test-bench` benchmarks
+
+Expected validation commands:
+
+```bash
+python -m pip install -e 'services/scheduler[dev]'
+
+cd packages/openclaw-plugin
+npm install
+npm run typecheck
+npm run build
+npm test
+
+cd ../..
+python tools/validate_contracts.py
+python -m pytest tests/test_agent_test_bench_adapter.py tests/test_import_agent_test_bench_trace.py --basetemp .pytest-tmp-root
+
+cd services/scheduler
+python -m pytest
+
+cd ../..
+openclaw plugins install --link ./packages/openclaw-plugin --force
+openclaw plugins inspect hardware-scheduler --runtime --json
+```
 
 ## OpenClaw SDK
 
@@ -31,16 +44,12 @@ OpenClaw 2026.7.1 shape:
 - hooks: `before_tool_call`, `after_tool_call`, `model_call_started`,
   `model_call_ended`
 
-Before release, install the official OpenClaw SDK and run:
+Do not claim end-to-end OpenClaw runtime compatibility until runtime inspect
+confirms the hooks on the target Linux machine.
 
-```bash
-cd packages/openclaw-plugin
-npm install
-npm run typecheck
-npm run build
-openclaw.cmd plugins install --link . --force
-openclaw.cmd plugins inspect hardware-scheduler --runtime --json
-```
+## Windows Notes
 
-Do not claim end-to-end OpenClaw runtime compatibility until that runtime
-inspect confirms the hooks.
+Windows PowerShell may prefer generated `.ps1` npm shims and block them under
+the current execution policy. Use `npm.cmd` and `openclaw.cmd` only for manual
+Windows validation. The repository Makefile and operator docs intentionally use
+Linux commands by default.

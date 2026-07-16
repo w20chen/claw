@@ -17,8 +17,8 @@ Runtime config defaults:
 
 Observe a live run:
 
-```powershell
-openclaw.cmd agent --local --agent main --model deepseek/deepseek-v4-flash --message "Reply with exactly: openclaw-ok"
+```bash
+openclaw agent --local --agent main --model deepseek/deepseek-v4-flash --message 'Reply with exactly: openclaw-ok'
 curl http://127.0.0.1:8765/v1/tools/recent
 curl http://127.0.0.1:8765/metrics
 ```

@@ -2,39 +2,40 @@
 
 This project integrates `agent-test-bench` benchmarks as an external harness.
 It does not copy benchmark runners into the OpenClaw plugin and does not modify
-OpenClaw core or `C:\Users\29068\Desktop\agent-test-bench`.
+OpenClaw core or the `agent-test-bench` checkout.
 
 ## Run
 
 Use the wrapper when you want one command to run the original benchmark and
 then validate/import the produced traces:
 
-```powershell
-python tools\run_agent_test_bench.py -- `
-  --provider deepseek --model deepseek-chat `
-  --benchmark swe-rebench --scaffold openclaw `
-  --container docker --mcp-config none `
+```bash
+export AGENT_TEST_BENCH_ROOT=~/agent-test-bench
+python tools/run_agent_test_bench.py -- \
+  --provider deepseek --model deepseek-chat \
+  --benchmark swe-rebench --scaffold openclaw \
+  --container docker --mcp-config none \
   --sample 1
 ```
 
 Everything after `--` is passed verbatim to:
 
-```powershell
+```bash
 PYTHONPATH=src python -m trace_collect.cli ...
 ```
 
-The wrapper sets `PYTHONPATH` to `agent-test-bench\src`, runs from the
+The wrapper sets `PYTHONPATH` to `<agent-test-bench>/src`, runs from the
 `agent-test-bench` root, and lets `agent-test-bench` keep ownership of task
 selection, image choice, fixed-image preparation, container lifecycle, trace
 layout, and resume behavior.
 
 Preview the delegated command without running a benchmark:
 
-```powershell
-python tools\run_agent_test_bench.py --dry-run -- `
-  --provider deepseek --model deepseek-chat `
-  --benchmark swe-rebench --scaffold openclaw `
-  --container docker --mcp-config none `
+```bash
+python tools/run_agent_test_bench.py --dry-run -- \
+  --provider deepseek --model deepseek-chat \
+  --benchmark swe-rebench --scaffold openclaw \
+  --container docker --mcp-config none \
   --sample 1
 ```
 
@@ -42,16 +43,16 @@ python tools\run_agent_test_bench.py --dry-run -- `
 
 Validate an existing run directory or one `trace.jsonl` file:
 
-```powershell
-python tools\validate_agent_test_bench_run.py C:\Users\29068\Desktop\agent-test-bench\traces\...\run
+```bash
+python tools/validate_agent_test_bench_run.py ~/agent-test-bench/traces/.../run
 ```
 
 Generate scheduler-compatible offline artifacts while validating:
 
-```powershell
-python tools\validate_agent_test_bench_run.py <run-dir> `
-  --events-out artifacts\agent-test-bench-events.jsonl `
-  --profiles-out artifacts\agent-test-bench-tool-profiles.json
+```bash
+python tools/validate_agent_test_bench_run.py <run-dir> \
+  --events-out artifacts/agent-test-bench-events.jsonl \
+  --profiles-out artifacts/agent-test-bench-tool-profiles.json
 ```
 
 The validator checks:

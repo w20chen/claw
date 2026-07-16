@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from typing import Any
 
 from agent_scheduler.contracts.models import ResourceScope
 
@@ -60,7 +61,7 @@ class ProcessResourceSampler:
         now: float,
         mono: float,
         target_pid: int,
-        processes: list[object],
+        processes: list[Any],
     ) -> ResourceSnapshot:
         cpu_time = 0.0
         rss_bytes = 0
@@ -129,9 +130,9 @@ class ProcessResourceSampler:
         )
 
     @staticmethod
-    def _load_psutil() -> object | None:
+    def _load_psutil() -> Any | None:
         try:
-            import psutil  # type: ignore[import-not-found]
+            import psutil  # type: ignore[import-not-found,import-untyped]
 
             return psutil
         except Exception:

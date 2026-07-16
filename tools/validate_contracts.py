@@ -5,7 +5,7 @@ from pathlib import Path
 
 from copy import deepcopy
 
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 
 
 ROOT = Path(__file__).resolve().parents[1]

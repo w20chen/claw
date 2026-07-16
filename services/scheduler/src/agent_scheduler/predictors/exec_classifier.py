@@ -232,7 +232,7 @@ def extract_base_command(command: str) -> str:
 
 def _split_shell_segments(command: str) -> list[str]:
     segments: list[str] = []
-    current = []
+    current: list[str] = []
     in_single = False
     in_double = False
     i = 0

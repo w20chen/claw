@@ -1,5 +1,27 @@
 # Current Plan
 
+## 2026-07-16 Linux-Default Review
+
+- Updated repository defaults and docs to assume a Linux operator machine.
+- Passed: `python -m pip install -e 'services/scheduler[dev]'`
+  - Installed scheduler runtime/dev dependencies, including `jsonschema`.
+- Passed: `python tools/validate_contracts.py`
+- Passed: `python -m pytest tests\test_agent_test_bench_adapter.py tests\test_import_agent_test_bench_trace.py --basetemp .pytest-tmp-root`
+  - 3 tests passed.
+- Passed: `cd services/scheduler && python -m pytest --basetemp ../../.pytest-tmp`
+  - 12 tests passed.
+- Passed: `python -m ruff check .`
+- Passed: `python -m mypy .`
+- Passed: `cd packages/openclaw-plugin && npm.cmd install`
+- Passed: `cd packages/openclaw-plugin && npm.cmd test`
+- Passed: `cd packages/openclaw-plugin && npm.cmd run typecheck`
+- Passed: `cd packages/openclaw-plugin && npm.cmd run build`
+- Could not run: `docker compose config`
+  - Reason: the current validation machine does not have a `docker` command on
+    PATH. Docker Compose syntax was still reviewed in source, but container
+    config/build/runtime validation remains to be run on a Linux host with
+    Docker installed.
+
 ## Verified Environment
 
 - Date: 2026-07-16

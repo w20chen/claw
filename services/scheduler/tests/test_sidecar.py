@@ -17,7 +17,7 @@ def _client(tmp_path: Path) -> TestClient:
 
 def test_decision_and_completion_round_trip(tmp_path: Path) -> None:
     client = _client(tmp_path)
-    request = {
+    request: dict[str, object] = {
         "schema_version": "scheduler.v1",
         "event_id": "evt-1",
         "occurred_at": "2026-07-16T03:23:00Z",

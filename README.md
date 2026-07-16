@@ -1,4 +1,4 @@
-# OpenClaw Hardware-Aware Agent Scheduler
+# OpenClaw Agent Scheduler
 
 OpenClaw plugin plus Python sidecar for hardware-aware, privacy-preserving
 agent tool scheduling. The first delivery is intentionally conservative:
@@ -41,6 +41,8 @@ plugin linking, sidecar startup, live observation, and the `agent-test-bench`
 adapter.
 
 ```bash
+python -m pip install -e 'services/scheduler[dev]'
+cd packages/openclaw-plugin && npm install && cd ../..
 make dev-sidecar
 make test
 make build-plugin
@@ -50,6 +52,7 @@ Start the sidecar directly:
 
 ```bash
 cd services/scheduler
+export PYTHONPATH=src
 python -m agent_scheduler.main --host 127.0.0.1 --port 8765
 ```
 
@@ -103,11 +106,11 @@ mirror those schemas, and tests validate examples across both sides.
 
 ## agent-test-bench Integration
 
-The existing `C:\Users\29068\Desktop\agent-test-bench` repository remains a
-research and evaluation source. This project reads exported canonical
-`trace.jsonl` files and can generate scheduler tool profiles from `tool_exec`
-spans, but does not import its AgentLoop, benchmark runner, or agent scaffold
-into the online plugin runtime.
+An external `agent-test-bench` checkout remains a research and evaluation
+source. This project reads exported canonical `trace.jsonl` files and can
+generate scheduler tool profiles from `tool_exec` spans, but does not import
+its AgentLoop, benchmark runner, or agent scaffold into the online plugin
+runtime.
 
 To run benchmarks through the original harness and then validate/import traces,
 use `tools/run_agent_test_bench.py`; see
