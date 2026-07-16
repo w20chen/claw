@@ -63,6 +63,27 @@ export function paramFeatures(value: unknown): {
   };
 }
 
+export function jsonSafe(value: unknown, maxDepth = 8): unknown {
+  const seen = new WeakSet<object>();
+  function visit(item: unknown, depth: number): unknown {
+    if (depth > maxDepth) return "[MaxDepth]";
+    if (item === null) return null;
+    if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") return item;
+    if (typeof item === "bigint") return item.toString();
+    if (typeof item === "undefined" || typeof item === "function" || typeof item === "symbol") return null;
+    if (Array.isArray(item)) return item.map((child) => visit(child, depth + 1));
+    if (!isRecord(item)) return String(item);
+    if (seen.has(item)) return "[Circular]";
+    seen.add(item);
+    const output: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(item)) {
+      output[key] = visit(child, depth + 1);
+    }
+    return output;
+  }
+  return visit(value, 0);
+}
+
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`;
   if (isRecord(value)) {

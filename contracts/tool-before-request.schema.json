@@ -27,8 +27,8 @@
           },
           "additionalProperties": false
         },
-        "raw_params": {}
-        ,
+        "raw_params": {},
+        "raw_event": {},
         "resource_scope": {
           "type": ["object", "null"],
           "properties": {

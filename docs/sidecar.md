@@ -67,7 +67,9 @@ Useful metrics:
 - `scheduler_tool_context_switches_total`
 
 Set `AGENT_SCHEDULER_TRACE_PATH` to append live agent-test-bench v5-shaped
-`trace.jsonl` records. Tool args and tool results are written as `null`.
+`trace.jsonl` records. Tool args/results and model input/output are populated
+when the plugin sends raw fields with `recordRawTrace=true`; otherwise they are
+`null`.
 
 ## Managed Execution Registration
 

@@ -3,10 +3,10 @@ import {randomUUID} from "node:crypto";
 import {SidecarClient} from "./client.js";
 import {loadConfig, isRecord} from "./config.js";
 import {CorrelationMap} from "./correlation.js";
-import type {CommonEvent, ToolBeforeRequest, ToolCompletedEvent} from "./contracts.js";
+import type {CommonEvent, ModelEvent, PluginConfig, ToolBeforeRequest, ToolCompletedEvent} from "./contracts.js";
 import {buildTrustedResourceScope, instrumentExecParams} from "./exec-instrumentation.js";
 import {consoleLogger} from "./logging.js";
-import {paramFeatures, redact, stableDigest} from "./redaction.js";
+import {jsonSafe, paramFeatures, redact, stableDigest} from "./redaction.js";
 
 const pluginVersion = "0.1.0";
 
@@ -24,6 +24,7 @@ export default definePluginEntry({
       reportTimeoutMs: {type: "integer", default: 800, minimum: 1},
       failOpen: {type: "boolean", default: true},
       sendRawParams: {type: "boolean", default: false},
+      recordRawTrace: {type: "boolean", default: false},
       authTokenEnv: {type: "string", default: "OPENCLAW_SCHEDULER_TOKEN"},
       logLevel: {enum: ["error", "warn", "info", "debug"], default: "info"},
       executionBackend: {enum: ["hook-only", "marker", "managed-wrapper"], default: "hook-only"},
@@ -45,7 +46,7 @@ export default definePluginEntry({
   const correlation = new CorrelationMap(300_000, 10_000);
 
   api.on("before_tool_call", async (event: unknown, context: unknown) => {
-    const payload = buildToolBefore(event, config.sendRawParams);
+    const payload = buildToolBefore(event, config);
     mergeContext(payload, context);
     payload.resource_scope = buildTrustedResourceScope(event, context);
     try {
@@ -70,7 +71,11 @@ export default definePluginEntry({
   });
 
   api.on("after_tool_call", async (event: unknown, context: unknown) => {
-    const completion = buildCompletion(event, correlation.take(extractString(event, ["tool_call_id", "toolCallId", "id"])));
+    const completion = buildCompletion(
+      event,
+      correlation.take(extractString(event, ["tool_call_id", "toolCallId", "id"])),
+      config
+    );
     mergeContext(completion, context);
     completion.resource_scope = buildTrustedResourceScope(event, context);
     if (completion.resource_scope === null && completion.execution_id !== null) {
@@ -88,11 +93,11 @@ export default definePluginEntry({
   });
 
   api.on("model_call_started", async (event: unknown, context: unknown) => {
-    await reportModel(client, logger, event, "model_call_started");
+    await reportModel(client, logger, event, "model_call_started", config);
   });
 
   api.on("model_call_ended", async (event: unknown, context: unknown) => {
-    await reportModel(client, logger, event, "model_call_ended");
+    await reportModel(client, logger, event, "model_call_ended", config);
   });
 }
 });
@@ -110,9 +115,10 @@ function common(event: unknown): CommonEvent {
   };
 }
 
-function buildToolBefore(event: unknown, sendRawParams: boolean): ToolBeforeRequest {
+function buildToolBefore(event: unknown, config: PluginConfig): ToolBeforeRequest {
   const params = isRecord(event) ? event.params ?? event.arguments ?? event.input ?? null : null;
   const safeParams = redact(params);
+  const rawParams = config.recordRawTrace ? jsonSafe(params) : config.sendRawParams ? safeParams : null;
   const toolName = extractString(event, ["tool_name", "toolName", "name"]) ?? "unknown";
   return {
     ...common(event),
@@ -124,7 +130,8 @@ function buildToolBefore(event: unknown, sendRawParams: boolean): ToolBeforeRequ
     derived_paths: [],
     params_digest: stableDigest(safeParams),
     param_features: paramFeatures(safeParams),
-    raw_params: sendRawParams ? safeParams : null,
+    raw_params: rawParams,
+    raw_event: config.recordRawTrace ? jsonSafe(event) : null,
     resource_scope: null
   };
 }
@@ -247,9 +254,11 @@ function mergeContext(payload: CommonEvent, context: unknown): void {
 
 function buildCompletion(
   event: unknown,
-  prior: {decisionId: string | null; leaseId: string | null; executionId: string | null} | null
+  prior: {decisionId: string | null; leaseId: string | null; executionId: string | null} | null,
+  config: PluginConfig
 ): ToolCompletedEvent {
   const errorType = extractString(event, ["error_type", "errorType"]);
+  const rawResult = config.recordRawTrace ? jsonSafe(extractToolResult(event)) : null;
   return {
     ...common(event),
     tool_call_id: extractString(event, ["tool_call_id", "toolCallId", "id"]),
@@ -262,13 +271,21 @@ function buildCompletion(
     error_type: errorType,
     error_digest: null,
     result_size_bytes: extractNumber(event, ["result_size_bytes", "resultSizeBytes"]),
+    raw_result: rawResult,
+    raw_event: config.recordRawTrace ? jsonSafe(event) : null,
     resource_scope: null
   };
 }
 
-async function reportModel(client: SidecarClient, logger: {warn(message: string, data?: unknown): void}, event: unknown, eventType: string): Promise<void> {
+async function reportModel(
+  client: SidecarClient,
+  logger: {warn(message: string, data?: unknown): void},
+  event: unknown,
+  eventType: "model_call_started" | "model_call_ended",
+  config: PluginConfig
+): Promise<void> {
   try {
-    await client.reportModel({
+    const payload: ModelEvent = {
       ...common(event),
       event_type: eventType,
       call_id: extractString(event, ["call_id", "callId", "id"]),
@@ -276,11 +293,30 @@ async function reportModel(client: SidecarClient, logger: {warn(message: string,
       model: extractString(event, ["model"]),
       duration_ms: extractNumber(event, ["duration_ms", "durationMs"]),
       outcome: extractString(event, ["outcome", "status"]),
-      context_token_budget: extractNumber(event, ["context_token_budget", "contextTokenBudget"])
-    });
+      context_token_budget: extractNumber(event, ["context_token_budget", "contextTokenBudget"]),
+      raw_input: config.recordRawTrace ? jsonSafe(extractModelInput(event)) : null,
+      raw_output: config.recordRawTrace ? jsonSafe(extractModelOutput(event)) : null,
+      raw_event: config.recordRawTrace ? jsonSafe(event) : null
+    };
+    await client.reportModel(payload);
   } catch (error) {
     logger.warn("hardware scheduler model report failed", classifyError(error));
   }
+}
+
+function extractToolResult(event: unknown): unknown {
+  if (!isRecord(event)) return null;
+  return event.result ?? event.output ?? event.response ?? event.content ?? event.data ?? event.toolResult ?? null;
+}
+
+function extractModelInput(event: unknown): unknown {
+  if (!isRecord(event)) return null;
+  return event.messages ?? event.input ?? event.prompt ?? event.request ?? event.body ?? null;
+}
+
+function extractModelOutput(event: unknown): unknown {
+  if (!isRecord(event)) return null;
+  return event.output ?? event.response ?? event.content ?? event.message ?? event.choices ?? event.body ?? null;
 }
 
 function extractString(value: unknown, keys: string[]): string | null {

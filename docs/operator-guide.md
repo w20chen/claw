@@ -1,32 +1,58 @@
-# Operator Guide
+# Real OpenClaw Trace + Resource Recorder Guide
 
-This guide is the shortest end-to-end path for running the plugin and sidecar.
-It assumes Linux, Python 3.12, Node.js 24, npm, and OpenClaw `2026.7.1`.
+This guide is for the real target path:
 
-Use `npm.cmd` and `openclaw.cmd` on Windows PowerShell if `.ps1` shims are
-blocked.
+```text
+OpenClaw agent task
+  -> hardware-scheduler OpenClaw plugin hooks
+  -> scheduler sidecar
+  -> agent-test-bench-style trace.jsonl
+  -> per-tool CPU / memory / network / disk I/O resource usage
+```
 
-## Install
+The project must remain an OpenClaw plugin plus sidecar. It does not modify
+OpenClaw core.
+
+## What You Should Expect
+
+For a real OpenClaw run, the sidecar writes `trace.jsonl` records like:
+
+```json
+{"type":"trace_metadata","trace_format_version":5,"scaffold":"openclaw","mode":"collect"}
+{"type":"action","action_type":"llm_call","data":{"messages_in":[...],"content":"...","llm_latency_ms":1234.0}}
+{"type":"action","action_type":"tool_exec","data":{"tool_name":"exec","tool_args":{"command":"..."},"tool_result":"...","resource_usage":{"cpu_time_delta_s":0.1,"memory_footprint_bytes":12345678,"disk_read_bytes_delta":0,"disk_write_bytes_delta":4096,"net_rx_bytes_delta":0,"net_tx_bytes_delta":0}}}
+```
+
+`recordRawTrace: true` is the important plugin switch. It tells the plugin to
+send the OpenClaw hook-visible model input/output, tool args/results, and raw
+hook payloads to the sidecar. If OpenClaw does not expose a specific internal
+field to plugin hooks, the plugin cannot record that field without changing
+OpenClaw itself.
+
+Resource fields are strongest for `exec` in `managed-wrapper` mode because
+`claw-launch` gives the sidecar a trusted PID or cgroup scope. Without a
+trusted scope, the trace still records the tool action, but resource attribution
+is `unattributed`.
+
+## 1. Install And Build
 
 ```bash
 cd ~/claw
-npm install -g openclaw@2026.7.1
 python -m pip install -e 'services/scheduler[dev]'
 
 cd packages/openclaw-plugin
 npm install
-npm run typecheck
 npm run build
 cd ../..
 ```
 
-If editable Python install fails:
+Confirm `claw-launch` is available:
 
 ```bash
-python -m pip install 'services/scheduler[dev]'
+claw-launch --help
 ```
 
-## Link Plugin
+## 2. Link The Plugin Into OpenClaw
 
 ```bash
 cd ~/claw
@@ -35,7 +61,7 @@ openclaw plugins enable hardware-scheduler
 openclaw plugins inspect hardware-scheduler --runtime --json
 ```
 
-Expected hooks:
+The inspect output must show these hooks:
 
 ```text
 before_tool_call
@@ -44,44 +70,61 @@ model_call_started
 model_call_ended
 ```
 
-## Start Sidecar
+## 3. Configure The Plugin For Real Raw Trace Recording
+
+Patch OpenClaw config non-interactively:
+
+```bash
+cat <<'JSON5' | openclaw config patch --stdin
+{
+  plugins: {
+    "hardware-scheduler": {
+      endpoint: "http://127.0.0.1:8765",
+      mode: "observe",
+      failOpen: true,
+      recordRawTrace: true,
+      executionBackend: "managed-wrapper",
+      launcherPath: "claw-launch",
+      securityBoundaryAccepted: true
+    }
+  }
+}
+JSON5
+```
+
+Validate config:
+
+```bash
+openclaw config validate
+openclaw config get plugins.hardware-scheduler
+```
+
+If `managed-wrapper` causes trouble while debugging, temporarily switch to
+`executionBackend: "hook-only"`. That still records model/tool trace content,
+but OS resource usage may be `unattributed`.
+
+## 4. Start The Sidecar Trace Writer
+
+Terminal 1:
 
 ```bash
 cd ~/claw/services/scheduler
 export PYTHONPATH=src
-export AGENT_SCHEDULER_DB_PATH=../../data/scheduler.sqlite3
-export AGENT_SCHEDULER_POLICY=observe-only
+export AGENT_SCHEDULER_DB_PATH=../../data/openclaw-trace.sqlite3
 export AGENT_SCHEDULER_TRACE_PATH=../../data/trace.jsonl
 python -m agent_scheduler.main --host 127.0.0.1 --port 8765
 ```
 
-Health checks:
+Check health from another shell:
 
 ```bash
 curl http://127.0.0.1:8765/health/live
 curl http://127.0.0.1:8765/health/ready
 ```
 
-## Run A Local Demo
+## 5. Run A Real OpenClaw Task
 
-From another shell:
-
-```bash
-cd ~/claw
-python tools/demo_supported_features.py --run-launcher
-```
-
-Inspect sidecar output:
-
-```bash
-curl http://127.0.0.1:8765/v1/tools/recent
-curl http://127.0.0.1:8765/metrics
-tail -n 20 data/trace.jsonl
-```
-
-## Run With OpenClaw
-
-Choose a model that your OpenClaw installation can actually run:
+Choose a model that your OpenClaw install can actually run:
 
 ```bash
 openclaw models list
@@ -89,46 +132,62 @@ openclaw models status
 export OPENCLAW_TEST_MODEL='<provider/model-from-openclaw-models-list>'
 ```
 
-Run a task that uses shell tools:
+Run a task that forces a shell tool call:
 
 ```bash
+cd ~/claw
 openclaw agent --local --agent main --model "$OPENCLAW_TEST_MODEL" \
-  --message 'Use the shell to print the current working directory, then summarize it.'
+  --message 'Use the shell to run: python -c "import pathlib, time; pathlib.Path(\"openclaw_trace_probe.txt\").write_text(\"trace-probe\\n\"); print(2 + 2); time.sleep(1)". Then summarize the result.'
 ```
 
-Then inspect:
+This should create a real OpenClaw model turn and a real OpenClaw `exec` tool
+call. The plugin observes those hooks and the sidecar writes the trace.
+
+## 6. Inspect The Real Trace
 
 ```bash
-curl http://127.0.0.1:8765/v1/tools/recent
+tail -n 20 data/trace.jsonl
+curl 'http://127.0.0.1:8765/v1/tools/recent?limit=5'
 curl http://127.0.0.1:8765/metrics
-tail -n 20 ~/claw/data/trace.jsonl
 ```
 
-## Exec Backends
+For easier reading:
 
-`executionBackend` controls built-in `exec` handling:
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
 
-- `hook-only`: observe/report only.
-- `marker`: preserve command and add correlation env vars.
-- `managed-wrapper`: register original command with the sidecar, then rewrite
-  OpenClaw's command to `claw-launch`.
-
-Minimal managed-wrapper config:
-
-```json5
-{
-  plugins: {
-    "hardware-scheduler": {
-      endpoint: "http://127.0.0.1:8765",
-      executionBackend: "managed-wrapper",
-      launcherPath: "claw-launch",
-      securityBoundaryAccepted: true
-    }
-  }
-}
+for line in Path("data/trace.jsonl").read_text(encoding="utf-8").splitlines():
+    rec = json.loads(line)
+    if rec.get("type") != "action":
+        continue
+    print("\n==", rec.get("action_type"), rec.get("action_id"), "==")
+    data = rec.get("data", {})
+    if rec.get("action_type") == "llm_call":
+        print("messages_in:", json.dumps(data.get("messages_in"), ensure_ascii=False)[:1000])
+        print("content:", json.dumps(data.get("content"), ensure_ascii=False)[:1000])
+    if rec.get("action_type") == "tool_exec":
+        print("tool_name:", data.get("tool_name"))
+        print("tool_args:", json.dumps(data.get("tool_args"), ensure_ascii=False)[:1000])
+        print("tool_result:", json.dumps(data.get("tool_result"), ensure_ascii=False)[:1000])
+        print("resource_usage:", json.dumps(data.get("resource_usage"), indent=2, ensure_ascii=False))
+PY
 ```
 
-For cgroup-v2 CPU placement experiments on Linux:
+You are looking for:
+
+- `llm_call.data.messages_in`
+- `llm_call.data.content`
+- `tool_exec.data.tool_args`
+- `tool_exec.data.tool_result`
+- `tool_exec.data.resource_usage.attribution_status`
+- CPU/RSS/disk/network fields inside `resource_usage`
+
+## 7. Optional cgroup Scope
+
+On Linux, managed-wrapper can use cgroup-v2 counters if you provide a writable
+root:
 
 ```bash
 sudo mkdir -p /sys/fs/cgroup/claw
@@ -136,40 +195,40 @@ sudo chown "$USER":"$USER" /sys/fs/cgroup/claw
 export CLAW_CGROUP_ROOT=/sys/fs/cgroup/claw
 ```
 
-Placement remains advisory policy-wise; the reference launcher applies cpuset
-only when it receives placement metadata and has a writable cgroup root.
+Then rerun the OpenClaw task. `resource_usage.monitor_source` should become
+`cgroup-v2` when the launcher successfully registers a cgroup scope.
 
-## What The Trace Contains
+## 8. Troubleshooting
 
-Set `AGENT_SCHEDULER_TRACE_PATH` to append agent-test-bench v5-shaped JSONL:
+If `trace.jsonl` contains `tool_args: null` or `tool_result: null`:
 
-```json
-{"type":"trace_metadata","trace_format_version":5,"scaffold":"openclaw","mode":"collect"}
-{"type":"action","action_type":"tool_exec","action_id":"...","data":{"tool_name":"exec","tool_args":null,"tool_result":null,"resource_usage":{}}}
-```
+- Confirm `openclaw config get plugins.hardware-scheduler` shows
+  `recordRawTrace: true`.
+- Rebuild and relink the plugin after code changes:
+  `cd packages/openclaw-plugin && npm run build`, then rerun
+  `openclaw plugins install --link ./packages/openclaw-plugin`.
+- Confirm `openclaw plugins inspect hardware-scheduler --runtime --json`
+  still shows the four hooks.
 
-`tool_args` and `tool_result` are intentionally `null`. Resource usage is filled
-only when the sidecar has a trusted PID or cgroup scope.
+If resource usage is `unattributed`:
 
-## Validate
+- Prefer `executionBackend: "managed-wrapper"` for `exec`.
+- Confirm `claw-launch --help` works in the same environment OpenClaw uses.
+- On Linux, optionally set `CLAW_CGROUP_ROOT` before the OpenClaw run.
+
+If no model can run:
+
+- Fix OpenClaw model auth first with `openclaw models status` and the provider
+  setup flow for your environment.
+
+## 9. Sidecar-Only Smoke Test
+
+This is not the target path. It does not run OpenClaw. Keep it only as a quick
+sidecar sanity check when model auth is unavailable:
 
 ```bash
 cd ~/claw
-python tools/validate_contracts.py
-python -m pytest tests -q --basetemp .pytest-tmp-root
-
-cd services/scheduler
-python -m pytest tests -q
-
-cd ../../packages/openclaw-plugin
-npm test
-npm run typecheck
-npm run build
+python tools/demo_trace_recorder.py
 ```
 
-For OpenClaw upgrades, rerun:
-
-```bash
-openclaw plugins install --link ./packages/openclaw-plugin
-openclaw plugins inspect hardware-scheduler --runtime --json
-```
+The real validation is the OpenClaw task path above.

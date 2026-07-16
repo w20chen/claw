@@ -14,8 +14,19 @@
       "reportTimeoutMs": {"type": "integer", "default": 800, "minimum": 1},
       "failOpen": {"type": "boolean", "default": true},
       "sendRawParams": {"type": "boolean", "default": false},
+      "recordRawTrace": {"type": "boolean", "default": false},
       "authTokenEnv": {"type": "string", "default": "OPENCLAW_SCHEDULER_TOKEN"},
-      "logLevel": {"enum": ["error", "warn", "info", "debug"], "default": "info"}
+      "logLevel": {"enum": ["error", "warn", "info", "debug"], "default": "info"},
+      "executionBackend": {"enum": ["hook-only", "marker", "managed-wrapper"], "default": "hook-only"},
+      "launcherPath": {"type": "string", "default": "claw-launch"},
+      "collectorSocket": {"type": "string", "default": "/run/claw/collector.sock"},
+      "instrumentHosts": {"type": "array", "items": {"type": "string"}, "default": ["gateway"]},
+      "instrumentTools": {"type": "array", "items": {"type": "string"}, "default": ["exec"]},
+      "enableCgroup": {"type": "boolean", "default": true},
+      "enableAffinity": {"type": "boolean", "default": true},
+      "enableNuma": {"type": "boolean", "default": true},
+      "profilingMode": {"enum": ["off", "proc", "perf", "ksys", "vtune"], "default": "off"},
+      "securityBoundaryAccepted": {"type": "boolean", "default": false}
     },
     "additionalProperties": false
   }

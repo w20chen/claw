@@ -12,7 +12,7 @@ not in this working plan.
   - Sidecar protocol and persistence.
   - Per-tool runtime resource monitoring.
   - Live agent-test-bench-style `trace.jsonl`.
-  - Privacy-preserving metadata only.
+  - Optional raw model/tool trace capture through plugin hooks.
 
 ## Implemented
 
@@ -40,6 +40,8 @@ not in this working plan.
   - best-effort network rx/tx bytes
   - context switches
 - Optional `AGENT_SCHEDULER_TRACE_PATH` live trace writer.
+- Optional plugin `recordRawTrace=true` capture of hook-visible model
+  input/output, tool args/results, and raw hook payloads.
 - Offline `agent-test-bench` trace importer and benchmark adapter.
 
 ## Current Boundaries
@@ -49,8 +51,8 @@ not in this working plan.
 - Resource attribution is reliable only with trusted PID or cgroup scope.
 - Network I/O is namespace-level best effort from `/proc/<pid>/net/dev`.
 - Tools without scope are traced but marked `unattributed`.
-- Raw prompts, model responses, tool outputs, credentials, and raw tool params
-  must not be logged.
+- Raw model/tool content is recorded only when the plugin is explicitly
+  configured with `recordRawTrace=true`.
 - Do not modify OpenClaw core.
 - Do not modify `C:\Users\29068\Desktop\agent-test-bench`.
 

@@ -18,6 +18,8 @@
         "error_type": {"type": ["string", "null"]},
         "error_digest": {"type": ["string", "null"]},
         "result_size_bytes": {"type": ["integer", "null"], "minimum": 0},
+        "raw_result": {},
+        "raw_event": {},
         "resource_scope": {
           "type": ["object", "null"],
           "properties": {

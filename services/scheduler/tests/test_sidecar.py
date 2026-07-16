@@ -152,7 +152,8 @@ def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Pa
             "path_count": 0,
             "has_command_like_field": True,
         },
-        "raw_params": None,
+        "raw_params": {"command": "pytest tests/test_trace.py"},
+        "raw_event": {"params": {"command": "pytest tests/test_trace.py"}},
         "resource_scope": None,
     }
     decision = client.post("/v1/decisions/tool", json=request).json()
@@ -176,6 +177,8 @@ def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Pa
         "error_type": None,
         "error_digest": None,
         "result_size_bytes": 128,
+        "raw_result": "2 passed",
+        "raw_event": {"result": "2 passed"},
     }
     assert client.post("/v1/events/tool-completed", json=completion).json() == {"stored": True}
 
@@ -195,6 +198,9 @@ def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Pa
         "duration_ms": None,
         "outcome": None,
         "context_token_budget": 8192,
+        "raw_input": [{"role": "user", "content": "run tests"}],
+        "raw_output": None,
+        "raw_event": {"messages": [{"role": "user", "content": "run tests"}]},
     }
     model_ended = model_started | {
         "event_id": "evt-model-end",
@@ -202,6 +208,9 @@ def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Pa
         "event_type": "model_call_ended",
         "duration_ms": 2000,
         "outcome": "success",
+        "raw_input": None,
+        "raw_output": "done",
+        "raw_event": {"content": "done"},
     }
     assert client.post("/v1/events/model", json=model_started).json() == {"stored": True}
     assert client.post("/v1/events/model", json=model_ended).json() == {"stored": True}
@@ -217,8 +226,12 @@ def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Pa
     assert tool_record["action_id"] == "call-trace"
     assert tool_record["agent_id"] == "agent-trace"
     assert tool_record["data"]["tool_name"] == "exec"
-    assert tool_record["data"]["tool_args"] is None
-    assert tool_record["data"]["tool_result"] is None
+    assert tool_record["data"]["tool_args"] == {"command": "pytest tests/test_trace.py"}
+    assert tool_record["data"]["tool_result"] == "2 passed"
+    assert tool_record["data"]["openclaw_before_event"] == {
+        "params": {"command": "pytest tests/test_trace.py"}
+    }
+    assert tool_record["data"]["openclaw_after_event"] == {"result": "2 passed"}
     assert tool_record["data"]["duration_ms"] == 2000.0
     resource_usage = tool_record["data"]["resource_usage"]
     assert resource_usage["attribution_status"] == "unattributed"
@@ -232,6 +245,8 @@ def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Pa
     assert model_records[0]["type"] == "action"
     assert model_records[0]["action_id"] == "llm-trace"
     assert model_records[0]["data"]["model"] == "test-model"
+    assert model_records[0]["data"]["messages_in"] == [{"role": "user", "content": "run tests"}]
+    assert model_records[0]["data"]["content"] == "done"
 
 
 def test_execution_registration_round_trip(tmp_path: Path) -> None:

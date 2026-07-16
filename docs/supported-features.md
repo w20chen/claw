@@ -14,7 +14,7 @@ full run sequence, use [operator-guide.md](operator-guide.md).
 | Model events | Supported | Stored and optionally written to trace. |
 | Runtime samples | Supported | CPU, RSS, disk I/O, network I/O, context switches when scoped. |
 | Live `trace.jsonl` | Supported | Enable with `AGENT_SCHEDULER_TRACE_PATH`. |
-| agent-test-bench format | Partial | v5-shaped records; raw args/results are redacted to `null`. |
+| agent-test-bench format | Supported | v5-shaped records; raw content requires `recordRawTrace=true`. |
 | Plugin hooks | Supported | `before_tool_call`, `after_tool_call`, model start/end. |
 | `exec` hook-only | Supported | No param rewrite. |
 | `exec` marker mode | Supported | Adds correlation env vars. |
@@ -86,9 +86,8 @@ python -m pytest tests -q --basetemp .pytest-tmp-root
 
 ```json
 {"type":"trace_metadata","trace_format_version":5,"scaffold":"openclaw","mode":"collect"}
-{"type":"action","action_type":"llm_call","action_id":"...","data":{"model":"...","llm_latency_ms":1234.0}}
-{"type":"action","action_type":"tool_exec","action_id":"...","data":{"tool_name":"exec","tool_args":null,"tool_result":null,"resource_usage":{"attribution_status":"pid"}}}
+{"type":"action","action_type":"llm_call","action_id":"...","data":{"messages_in":[...],"content":"...","llm_latency_ms":1234.0}}
+{"type":"action","action_type":"tool_exec","action_id":"...","data":{"tool_name":"exec","tool_args":{"command":"pytest"},"tool_result":"...","resource_usage":{"attribution_status":"pid"}}}
 ```
 
-The shape is compatible with agent-test-bench-style action records, while
-preserving this project's no-raw-prompt/no-raw-tool-output logging boundary.
+The plugin records raw model/tool content only when `recordRawTrace=true`.

@@ -14,7 +14,10 @@
         "model": {"type": ["string", "null"]},
         "duration_ms": {"type": ["integer", "null"], "minimum": 0},
         "outcome": {"type": ["string", "null"]},
-        "context_token_budget": {"type": ["integer", "null"], "minimum": 0}
+        "context_token_budget": {"type": ["integer", "null"], "minimum": 0},
+        "raw_input": {},
+        "raw_output": {},
+        "raw_event": {}
       }
     }
   ]

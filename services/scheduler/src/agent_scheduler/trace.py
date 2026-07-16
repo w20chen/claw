@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from agent_scheduler.contracts.models import ModelEvent, ToolCompletedEvent
+from agent_scheduler.contracts.models import ModelEvent, ToolBeforeRequest, ToolCompletedEvent
 from agent_scheduler.monitoring.tool_runtime import ToolRuntimeSample
 
 
@@ -16,6 +16,7 @@ class AgentTestBenchTraceWriter:
         self.scaffold = scaffold
         self._lock = threading.Lock()
         self._model_starts: dict[str, ModelEvent] = {}
+        self._tool_starts: dict[str, ToolBeforeRequest] = {}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not self.path.exists() or self.path.stat().st_size == 0:
             self._append(
@@ -28,7 +29,12 @@ class AgentTestBenchTraceWriter:
                 }
             )
 
+    def record_tool_started(self, event: ToolBeforeRequest) -> None:
+        self._tool_starts[_tool_key(event.tool_call_id, event.event_id)] = event
+
     def record_tool(self, event: ToolCompletedEvent, sample: ToolRuntimeSample) -> None:
+        start = self._pop_tool_start(event)
+        tool_args = None if start is None else start.raw_params
         self._append(
             {
                 "type": "action",
@@ -39,12 +45,14 @@ class AgentTestBenchTraceWriter:
                 "ts_end": sample.ended_at,
                 "data": {
                     "tool_name": event.tool_name,
-                    "tool_args": None,
-                    "tool_result": None,
+                    "tool_args": tool_args,
+                    "tool_result": event.raw_result,
                     "duration_ms": float(event.duration_ms),
                     "success": event.succeeded,
                     "error": event.error_type,
                     "resource_usage": _resource_usage(sample),
+                    "openclaw_before_event": None if start is None else start.raw_event,
+                    "openclaw_after_event": event.raw_event,
                 },
             }
         )
@@ -69,12 +77,16 @@ class AgentTestBenchTraceWriter:
                 "data": {
                     "provider": event.provider,
                     "model": event.model,
+                    "messages_in": None if start is None else start.raw_input,
+                    "content": event.raw_output,
                     "duration_ms": event.duration_ms,
                     "llm_latency_ms": (
                         float(event.duration_ms) if event.duration_ms is not None else None
                     ),
                     "outcome": event.outcome,
                     "context_token_budget": event.context_token_budget,
+                    "openclaw_started_event": None if start is None else start.raw_event,
+                    "openclaw_ended_event": event.raw_event,
                 },
             }
         )
@@ -85,12 +97,31 @@ class AgentTestBenchTraceWriter:
             with self.path.open("a", encoding="utf-8") as fh:
                 fh.write(line + "\n")
 
+    def _pop_tool_start(self, event: ToolCompletedEvent) -> ToolBeforeRequest | None:
+        start = self._tool_starts.pop(_tool_key(event.tool_call_id, event.event_id), None)
+        if start is not None or event.tool_call_id is not None:
+            return start
+        matches = [
+            (key, value)
+            for key, value in self._tool_starts.items()
+            if value.tool_name == event.tool_name
+        ]
+        if len(matches) != 1:
+            return None
+        key, value = matches[0]
+        self._tool_starts.pop(key, None)
+        return value
+
 
 def _parse_timestamp(value: str) -> float:
     try:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
     except ValueError:
         return datetime.now(timezone.utc).timestamp()
+
+
+def _tool_key(tool_call_id: str | None, event_id: str) -> str:
+    return tool_call_id or event_id
 
 
 def _resource_usage(sample: ToolRuntimeSample) -> dict[str, Any]:

@@ -9,6 +9,7 @@ const baseConfig = {
   reportTimeoutMs: 800,
   failOpen: true,
   sendRawParams: false,
+  recordRawTrace: false,
   authTokenEnv: "OPENCLAW_SCHEDULER_TOKEN",
   logLevel: "info",
   executionBackend: "marker",

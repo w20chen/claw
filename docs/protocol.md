@@ -28,6 +28,19 @@ Tool request messages may include:
   `process_start_time`, `container_id`, or cgroup-v2 fields such as
   `execution_id`, `root_pid`, and `cgroup_path`. PID metrics are only
   attributed when this scope is present and readable.
+- `raw_params` and `raw_event`: optional raw trace fields populated only when
+  the plugin is configured with `recordRawTrace=true` or `sendRawParams=true`.
+
+Tool completion messages may include:
+
+- `raw_result`: hook-visible tool output/result.
+- `raw_event`: the JSON-safe OpenClaw hook payload.
+
+Model events may include:
+
+- `raw_input`: hook-visible model input/messages/prompt.
+- `raw_output`: hook-visible model response/content.
+- `raw_event`: the JSON-safe OpenClaw hook payload.
 
 The plugin only trusts fixed `resource_scope` / `execution_scope` fields. It
 does not recursively search arbitrary hook payloads for `pid`-like keys.

@@ -7,6 +7,7 @@ const defaults: PluginConfig = {
   reportTimeoutMs: 800,
   failOpen: true,
   sendRawParams: false,
+  recordRawTrace: false,
   authTokenEnv: "OPENCLAW_SCHEDULER_TOKEN",
   logLevel: "info",
   executionBackend: "hook-only",
@@ -32,6 +33,12 @@ export function loadConfig(input: unknown): PluginConfig {
   }
   if (!Number.isInteger(config.reportTimeoutMs) || config.reportTimeoutMs <= 0) {
     throw new Error("reportTimeoutMs must be a positive integer");
+  }
+  if (typeof config.sendRawParams !== "boolean") {
+    throw new Error("sendRawParams must be a boolean");
+  }
+  if (typeof config.recordRawTrace !== "boolean") {
+    throw new Error("recordRawTrace must be a boolean");
   }
   if (!["hook-only", "marker", "managed-wrapper"].includes(String(config.executionBackend))) {
     throw new Error(`invalid executionBackend: ${String(config.executionBackend)}`);

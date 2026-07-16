@@ -9,6 +9,7 @@ export type PluginConfig = {
   reportTimeoutMs: number;
   failOpen: boolean;
   sendRawParams: boolean;
+  recordRawTrace: boolean;
   authTokenEnv: string;
   logLevel: "error" | "warn" | "info" | "debug";
   executionBackend: ExecutionBackend;
@@ -65,6 +66,7 @@ export type ToolBeforeRequest = CommonEvent & {
     has_command_like_field: boolean;
   };
   raw_params: unknown | null;
+  raw_event: unknown | null;
   resource_scope: ResourceScope | null;
 };
 
@@ -123,5 +125,20 @@ export type ToolCompletedEvent = CommonEvent & {
   error_type: string | null;
   error_digest: string | null;
   result_size_bytes: number | null;
+  raw_result: unknown | null;
+  raw_event: unknown | null;
   resource_scope: ResourceScope | null;
+};
+
+export type ModelEvent = CommonEvent & {
+  event_type: "model_call_started" | "model_call_ended";
+  call_id: string | null;
+  provider: string | null;
+  model: string | null;
+  duration_ms: number | null;
+  outcome: string | null;
+  context_token_budget: number | null;
+  raw_input: unknown | null;
+  raw_output: unknown | null;
+  raw_event: unknown | null;
 };

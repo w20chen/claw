@@ -1,7 +1,7 @@
 # OpenClaw Agent Scheduler
 
-OpenClaw plugin plus Python sidecar for privacy-preserving tool tracing,
-runtime resource monitoring, and future hardware-aware scheduling.
+OpenClaw plugin plus Python sidecar for task-level trace recording, runtime
+resource monitoring, and future hardware-aware scheduling.
 
 The project boundary is intentionally narrow:
 
@@ -9,8 +9,9 @@ The project boundary is intentionally narrow:
 - No OpenClaw core changes.
 - No `agent-test-bench` runtime import.
 - JSON Schema under `contracts/` is the protocol source of truth.
-- Raw prompts, model responses, tool output, credentials, and raw tool
-  parameters are not logged.
+- Raw trace capture is opt-in with plugin `recordRawTrace=true`. When enabled,
+  the plugin records the OpenClaw hook payload fields it can see, without
+  modifying OpenClaw core.
 
 ## What Works Now
 
@@ -26,7 +27,9 @@ The project boundary is intentionally narrow:
   - best-effort network rx/tx bytes
   - context switches
 - Optional live `trace.jsonl` writer shaped like `agent-test-bench` v5:
-  `trace_metadata`, `llm_call`, and `tool_exec`.
+  `trace_metadata`, `llm_call`, and `tool_exec`. With `recordRawTrace=true`,
+  records include visible model input/output, tool args/results, and raw hook
+  event payloads.
 - `exec` backends:
   - `hook-only`: observe only.
   - `marker`: preserve command and inject correlation env vars.
@@ -81,15 +84,34 @@ openclaw plugins enable hardware-scheduler
 openclaw plugins inspect hardware-scheduler --runtime --json
 ```
 
-Run the local demo:
+Configure the plugin for real raw trace recording:
 
 ```bash
-python tools/demo_supported_features.py --run-launcher
+cat <<'JSON5' | openclaw config patch --stdin
+{
+  plugins: {
+    "hardware-scheduler": {
+      endpoint: "http://127.0.0.1:8765",
+      mode: "observe",
+      failOpen: true,
+      recordRawTrace: true,
+      executionBackend: "managed-wrapper",
+      launcherPath: "claw-launch",
+      securityBoundaryAccepted: true
+    }
+  }
+}
+JSON5
 ```
 
-Inspect outputs:
+Run a real OpenClaw task and inspect outputs:
 
 ```bash
+openclaw models list
+export OPENCLAW_TEST_MODEL='<provider/model-from-openclaw-models-list>'
+openclaw agent --local --agent main --model "$OPENCLAW_TEST_MODEL" \
+  --message 'Use the shell to run: python -c "print(2 + 2)". Then summarize the result.'
+
 curl http://127.0.0.1:8765/v1/tools/recent
 curl http://127.0.0.1:8765/metrics
 tail -n 20 data/trace.jsonl
@@ -113,6 +135,8 @@ Plugin:
 - `executionBackend`: `hook-only`, `marker`, or `managed-wrapper`.
 - `launcherPath`: path to `claw-launch` for `managed-wrapper`.
 - `securityBoundaryAccepted`: required for `managed-wrapper`.
+- `recordRawTrace`: set `true` to record visible OpenClaw hook input/output
+  content into `trace.jsonl`.
 
 ## Docs
 

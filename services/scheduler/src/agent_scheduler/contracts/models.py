@@ -57,6 +57,7 @@ class ToolBeforeRequest(CommonEvent):
     params_digest: str
     param_features: ParamFeatures
     raw_params: Any | None = None
+    raw_event: Any | None = None
     resource_scope: ResourceScope | None = None
 
 
@@ -105,6 +106,8 @@ class ToolCompletedEvent(CommonEvent):
     error_type: str | None
     error_digest: str | None
     result_size_bytes: int | None = Field(default=None, ge=0)
+    raw_result: Any | None = None
+    raw_event: Any | None = None
     resource_scope: ResourceScope | None = None
 
 
@@ -116,6 +119,9 @@ class ModelEvent(CommonEvent):
     duration_ms: int | None = Field(default=None, ge=0)
     outcome: str | None
     context_token_budget: int | None = Field(default=None, ge=0)
+    raw_input: Any | None = None
+    raw_output: Any | None = None
+    raw_event: Any | None = None
 
 
 class StatusResponse(BaseModel):

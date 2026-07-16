@@ -72,6 +72,8 @@ def create_app(state: AppState | None = None) -> FastAPI:
         start = time.monotonic()
         s.metrics.inc("scheduler_tool_requests_total")
         s.store.save_request(request)
+        if s.trace_writer is not None:
+            s.trace_writer.record_tool_started(request)
         prediction = await s.predictor.predict(request)
         decision = await s.policy.decide(
             request,
