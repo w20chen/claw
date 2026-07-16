@@ -41,6 +41,8 @@ plugin linking, sidecar startup, live observation, and the `agent-test-bench`
 adapter.
 
 ```bash
+npm install -g openclaw@2026.7.1
+openclaw --version
 python -m pip install -e 'services/scheduler[dev]'
 cd packages/openclaw-plugin && npm install && cd ../..
 make dev-sidecar
@@ -72,6 +74,11 @@ openclaw plugins install --link ./packages/openclaw-plugin --force
 openclaw plugins enable hardware-scheduler
 openclaw plugins inspect hardware-scheduler --runtime --json
 ```
+
+This plugin is coupled to OpenClaw's plugin SDK and hook payloads. The validated
+baseline is OpenClaw `2026.7.1`; newer versions should be used only after
+`openclaw plugins inspect hardware-scheduler --runtime --json` confirms the
+hooks still load.
 
 ## Architecture
 

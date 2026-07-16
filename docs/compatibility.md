@@ -6,8 +6,21 @@ The supported operator path assumes Linux with:
 
 - Python 3.12
 - Node.js 24 and npm
-- OpenClaw 2026.7.1 or newer
+- OpenClaw 2026.7.1 as the validated baseline
 - Docker or Podman only when running `agent-test-bench` benchmarks
+
+Install the validated OpenClaw CLI version:
+
+```bash
+npm install -g openclaw@2026.7.1
+openclaw --version
+```
+
+The plugin package declares `openclaw >=2026.7.1` as a peer dependency, but
+newer OpenClaw releases must be revalidated before use because the integration
+depends on plugin SDK entrypoints, manifest loading, hook names, and hook
+payload shapes. Avoid `openclaw@latest` unless the runtime inspect checks below
+are rerun successfully on the target machine.
 
 Expected validation commands:
 
@@ -46,6 +59,18 @@ OpenClaw 2026.7.1 shape:
 
 Do not claim end-to-end OpenClaw runtime compatibility until runtime inspect
 confirms the hooks on the target Linux machine.
+
+When upgrading OpenClaw:
+
+```bash
+npm install -g openclaw@<target-version>
+openclaw --version
+openclaw plugins install --link ./packages/openclaw-plugin --force
+openclaw plugins inspect hardware-scheduler --runtime --json
+```
+
+Keep `packages/openclaw-plugin/package.json` `peerDependencies.openclaw` in sync
+with the oldest OpenClaw version that has passed this runtime inspection.
 
 ## Windows Notes
 
