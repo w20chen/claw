@@ -139,7 +139,27 @@ curl http://127.0.0.1:8765/health/live
 curl http://127.0.0.1:8765/health/ready
 ```
 
-## 5. Run A Real OpenClaw Task
+## 5. Export Plugin Runtime Overrides
+
+Your latest run showed that OpenClaw accepted the config patch but the hook-only
+plugin still behaved as if it had default config. To make the real run
+unambiguous, export these variables in the shell that runs `openclaw agent`.
+The plugin reads them directly as a fallback when `api.pluginConfig` is not
+populated:
+
+```bash
+export OPENCLAW_HARDWARE_SCHEDULER_ENDPOINT=http://127.0.0.1:8765
+export OPENCLAW_HARDWARE_SCHEDULER_RECORD_RAW_TRACE=true
+export OPENCLAW_HARDWARE_SCHEDULER_EXECUTION_BACKEND=managed-wrapper
+export OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH=claw-launch
+export OPENCLAW_HARDWARE_SCHEDULER_SECURITY_BOUNDARY_ACCEPTED=true
+```
+
+For a long-lived Gateway service, put equivalent values into the Gateway
+environment before restarting it. For `openclaw agent --local`, exporting them
+in the current shell is enough.
+
+## 6. Run A Real OpenClaw Task
 
 Choose a model that your OpenClaw install can actually run:
 
@@ -160,7 +180,7 @@ openclaw agent --local --agent main --model "$OPENCLAW_TEST_MODEL" \
 This should create a real OpenClaw model turn and a real OpenClaw `exec` tool
 call. The plugin observes those hooks and the sidecar writes the trace.
 
-## 6. Inspect The Real Trace
+## 7. Inspect The Real Trace
 
 ```bash
 tail -n 20 data/trace.jsonl
@@ -201,7 +221,7 @@ You are looking for:
 - `tool_exec.data.resource_usage.attribution_status`
 - CPU/RSS/disk/network fields inside `resource_usage`
 
-## 7. Optional cgroup Scope
+## 8. Optional cgroup Scope
 
 On Linux, managed-wrapper can use cgroup-v2 counters if you provide a writable
 root:
@@ -215,7 +235,7 @@ export CLAW_CGROUP_ROOT=/sys/fs/cgroup/claw
 Then rerun the OpenClaw task. `resource_usage.monitor_source` should become
 `cgroup-v2` when the launcher successfully registers a cgroup scope.
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 If `openclaw config patch --stdin` fails with:
 
@@ -250,7 +270,7 @@ If no model can run:
 - Fix OpenClaw model auth first with `openclaw models status` and the provider
   setup flow for your environment.
 
-## 9. Sidecar-Only Smoke Test
+## 10. Sidecar-Only Smoke Test
 
 This is not the target path. It does not run OpenClaw. Keep it only as a quick
 sidecar sanity check when model auth is unavailable:

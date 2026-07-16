@@ -24,7 +24,7 @@ const defaults: PluginConfig = {
 
 export function loadConfig(input: unknown): PluginConfig {
   const raw = isRecord(input) ? input : {};
-  const config = {...defaults, ...raw};
+  const config = {...defaults, ...raw, ...envOverrides()};
   if (config.mode !== "observe" && config.mode !== "enforce") {
     throw new Error(`invalid mode: ${String(config.mode)}`);
   }
@@ -66,4 +66,40 @@ export function loadConfig(input: unknown): PluginConfig {
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function envOverrides(): Partial<PluginConfig> {
+  const output: Partial<PluginConfig> = {};
+  setString(output, "endpoint", process.env.OPENCLAW_HARDWARE_SCHEDULER_ENDPOINT);
+  setString(output, "mode", process.env.OPENCLAW_HARDWARE_SCHEDULER_MODE);
+  setString(output, "launcherPath", process.env.OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH);
+  setString(output, "executionBackend", process.env.OPENCLAW_HARDWARE_SCHEDULER_EXECUTION_BACKEND);
+  setBoolean(output, "failOpen", process.env.OPENCLAW_HARDWARE_SCHEDULER_FAIL_OPEN);
+  setBoolean(output, "recordRawTrace", process.env.OPENCLAW_HARDWARE_SCHEDULER_RECORD_RAW_TRACE);
+  setBoolean(
+    output,
+    "securityBoundaryAccepted",
+    process.env.OPENCLAW_HARDWARE_SCHEDULER_SECURITY_BOUNDARY_ACCEPTED
+  );
+  return output;
+}
+
+function setString<K extends keyof PluginConfig>(
+  output: Partial<PluginConfig>,
+  key: K,
+  value: string | undefined
+): void {
+  if (value !== undefined && value.length > 0) {
+    (output as Record<string, unknown>)[key] = value;
+  }
+}
+
+function setBoolean<K extends keyof PluginConfig>(
+  output: Partial<PluginConfig>,
+  key: K,
+  value: string | undefined
+): void {
+  if (value === undefined || value.length === 0) return;
+  const normalized = value.toLowerCase();
+  (output as Record<string, unknown>)[key] = ["1", "true", "yes", "on"].includes(normalized);
 }

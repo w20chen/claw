@@ -112,6 +112,12 @@ JSON5
 Run a real OpenClaw task and inspect outputs:
 
 ```bash
+export OPENCLAW_HARDWARE_SCHEDULER_ENDPOINT=http://127.0.0.1:8765
+export OPENCLAW_HARDWARE_SCHEDULER_RECORD_RAW_TRACE=true
+export OPENCLAW_HARDWARE_SCHEDULER_EXECUTION_BACKEND=managed-wrapper
+export OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH=claw-launch
+export OPENCLAW_HARDWARE_SCHEDULER_SECURITY_BOUNDARY_ACCEPTED=true
+
 openclaw models list
 export OPENCLAW_TEST_MODEL='<provider/model-from-openclaw-models-list>'
 openclaw agent --local --agent main --model "$OPENCLAW_TEST_MODEL" \

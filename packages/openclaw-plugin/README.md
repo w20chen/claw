@@ -17,6 +17,16 @@ Key config:
 
 Set `recordRawTrace=true` to send OpenClaw hook-visible model input/output,
 tool args/results, and raw hook payloads to the sidecar trace writer.
+If OpenClaw does not pass `api.pluginConfig` to this hook-only plugin shape,
+the plugin also accepts these environment overrides:
+
+```bash
+export OPENCLAW_HARDWARE_SCHEDULER_ENDPOINT=http://127.0.0.1:8765
+export OPENCLAW_HARDWARE_SCHEDULER_RECORD_RAW_TRACE=true
+export OPENCLAW_HARDWARE_SCHEDULER_EXECUTION_BACKEND=managed-wrapper
+export OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH=claw-launch
+export OPENCLAW_HARDWARE_SCHEDULER_SECURITY_BOUNDARY_ACCEPTED=true
+```
 
 For stronger `exec` resource attribution, use `managed-wrapper`:
 
