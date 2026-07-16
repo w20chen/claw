@@ -126,22 +126,91 @@ binds `0.0.0.0` so Docker port publishing can reach it.
 
 ## 7. Run OpenClaw With The Plugin Active
 
-Configure model credentials outside this repository. For example:
+This scheduler is independent of the LLM provider. Configure the model in
+OpenClaw first, then this plugin observes tool lifecycle hooks and reports
+metadata to the sidecar. It does not add or replace OpenClaw model providers,
+and it does not require DeepSeek.
+
+Choose a model ID that OpenClaw actually knows on this machine:
+
+```bash
+openclaw models list
+openclaw models status
+export OPENCLAW_TEST_MODEL='<provider/model-from-openclaw-models-list>'
+```
+
+The exact model IDs are owned by the installed OpenClaw version, provider
+plugins, and model registry. Do not assume a provider's public API model name is
+accepted by OpenClaw until `openclaw models list` or `openclaw models status`
+shows it.
+
+### Optional DeepSeek Provider
+
+DeepSeek is an OpenClaw model provider, not a requirement of this scheduler.
+Configure credentials outside this repository. For example:
 
 ```bash
 export DEEPSEEK_API_KEY='<your-key>'
 ```
 
+If you want to use DeepSeek, install OpenClaw's official DeepSeek provider
+plugin and restart the Gateway first:
+
+```bash
+openclaw plugins install @openclaw/deepseek-provider
+openclaw gateway restart
+openclaw onboard --auth-choice deepseek-api-key
+openclaw models list --provider deepseek
+```
+
+For scripted Linux setup:
+
+```bash
+openclaw onboard --non-interactive \
+  --mode local \
+  --auth-choice deepseek-api-key \
+  --deepseek-api-key "$DEEPSEEK_API_KEY" \
+  --skip-health \
+  --accept-risk
+```
+
+If Gateway runs as a systemd user service, make the key available to that
+service, not only to the current shell. For example, put it in `~/.openclaw/.env`
+or configure OpenClaw's environment handling, then restart Gateway.
+
+After the DeepSeek provider plugin is installed, expected DeepSeek refs include
+`deepseek/deepseek-v4-flash` and `deepseek/deepseek-v4-pro`.
+
+### Optional Local vLLM Provider
+
+OpenClaw can also use a local vLLM server through its OpenAI-compatible `/v1`
+API. Start vLLM so it exposes `/v1/models` and `/v1/chat/completions`, usually
+at `http://127.0.0.1:8000/v1`, then configure OpenClaw:
+
+```bash
+export VLLM_API_KEY='vllm-local'
+openclaw onboard --non-interactive \
+  --mode local \
+  --auth-choice vllm \
+  --custom-base-url 'http://127.0.0.1:8000/v1' \
+  --custom-api-key "$VLLM_API_KEY" \
+  --custom-model-id '<your-vllm-model-id>'
+openclaw models list --provider vllm
+```
+
+If the local vLLM server does not enforce auth, any non-empty
+`VLLM_API_KEY` value is sufficient.
+
 Run a small agent call:
 
 ```bash
-openclaw agent --local --agent main --model deepseek/deepseek-v4-flash --message 'Reply with exactly: openclaw-ok'
+openclaw agent --local --agent main --model "$OPENCLAW_TEST_MODEL" --message 'Reply with exactly: openclaw-ok'
 ```
 
 For plugin observation, run a task that actually uses tools:
 
 ```bash
-openclaw agent --local --agent main --model deepseek/deepseek-v4-flash --message 'Use the shell to print the current working directory, then summarize it in one sentence.'
+openclaw agent --local --agent main --model "$OPENCLAW_TEST_MODEL" --message 'Use the shell to print the current working directory, then summarize it in one sentence.'
 ```
 
 After the run, inspect the scheduler:

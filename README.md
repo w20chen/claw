@@ -6,6 +6,12 @@ OpenClaw hooks normalize events and ask the local sidecar for allow/block
 decisions; the sidecar persists decisions, exposes metrics, predicts from
 static tool profiles, and returns advisory placement metadata.
 
+The scheduler is model-provider agnostic. It observes OpenClaw tool/model
+lifecycle hooks after OpenClaw has selected a model, so it can be used with any
+provider OpenClaw is configured to run, including hosted APIs, provider plugins
+such as DeepSeek, OpenRouter-style providers, and local OpenAI-compatible
+servers such as vLLM.
+
 Implemented:
 
 - `scheduler.v1` JSON contracts and examples.

@@ -69,6 +69,62 @@ OpenClaw 2026.7.1 shape:
 Do not claim end-to-end OpenClaw runtime compatibility until runtime inspect
 confirms the hooks on the target Linux machine.
 
+This scheduler is model-provider agnostic. It depends on OpenClaw plugin hooks,
+not on a specific model vendor. Hosted APIs, OpenClaw provider plugins,
+OpenRouter-style providers, and local OpenAI-compatible providers such as vLLM
+are all acceptable as long as OpenClaw can list and run the selected
+`provider/model` ref.
+
+OpenClaw agent smoke tests should use a model ID reported by the local
+OpenClaw install:
+
+```bash
+openclaw models list
+openclaw models status
+```
+
+Provider API names are not guaranteed to be valid OpenClaw model IDs.
+
+### DeepSeek
+
+DeepSeek support requires OpenClaw's provider plugin:
+
+```bash
+openclaw plugins install @openclaw/deepseek-provider
+openclaw gateway restart
+openclaw onboard --auth-choice deepseek-api-key
+openclaw models list --provider deepseek
+```
+
+The documented DeepSeek provider ID is `deepseek`, the auth environment
+variable is `DEEPSEEK_API_KEY`, and the provider uses an OpenAI-compatible API
+at `https://api.deepseek.com`. If Gateway runs as a daemon, the key must be
+available to the daemon process, for example through `~/.openclaw/.env`.
+
+Reference: https://docs.openclaw.ai/providers/deepseek
+
+### vLLM
+
+Local vLLM support uses OpenClaw's `vllm` provider and an OpenAI-compatible
+HTTP API. The default base URL is `http://127.0.0.1:8000/v1`; it must expose
+`/v1/models` and `/v1/chat/completions`.
+
+```bash
+export VLLM_API_KEY='vllm-local'
+openclaw onboard --non-interactive \
+  --mode local \
+  --auth-choice vllm \
+  --custom-base-url 'http://127.0.0.1:8000/v1' \
+  --custom-api-key "$VLLM_API_KEY" \
+  --custom-model-id '<your-vllm-model-id>'
+openclaw models list --provider vllm
+```
+
+If the vLLM server does not enforce auth, any non-empty `VLLM_API_KEY` value is
+enough for OpenClaw discovery.
+
+Reference: https://docs.openclaw.ai/providers/vllm
+
 When upgrading OpenClaw:
 
 ```bash
