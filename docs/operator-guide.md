@@ -72,20 +72,27 @@ model_call_ended
 
 ## 3. Configure The Plugin For Real Raw Trace Recording
 
-Patch OpenClaw config non-interactively:
+Patch OpenClaw config non-interactively. In OpenClaw `2026.7.1`, plugin
+runtime config lives under `plugins.entries.<plugin-id>.config`, not directly
+under `plugins.<plugin-id>`:
 
 ```bash
 cat <<'JSON5' | openclaw config patch --stdin
 {
   plugins: {
-    "hardware-scheduler": {
-      endpoint: "http://127.0.0.1:8765",
-      mode: "observe",
-      failOpen: true,
-      recordRawTrace: true,
-      executionBackend: "managed-wrapper",
-      launcherPath: "claw-launch",
-      securityBoundaryAccepted: true
+    entries: {
+      "hardware-scheduler": {
+        enabled: true,
+        config: {
+          endpoint: "http://127.0.0.1:8765",
+          mode: "observe",
+          failOpen: true,
+          recordRawTrace: true,
+          executionBackend: "managed-wrapper",
+          launcherPath: "claw-launch",
+          securityBoundaryAccepted: true
+        }
+      }
     }
   }
 }
@@ -96,8 +103,18 @@ Validate config:
 
 ```bash
 openclaw config validate
-openclaw config get plugins.hardware-scheduler
+openclaw config get plugins.entries.hardware-scheduler.config --json
 ```
+
+If you run agents through a long-lived Gateway, restart it after plugin
+install/config changes:
+
+```bash
+openclaw gateway restart
+```
+
+For `openclaw agent --local`, the new process should read the current config
+when the command starts.
 
 If `managed-wrapper` causes trouble while debugging, temporarily switch to
 `executionBackend: "hook-only"`. That still records model/tool trace content,
@@ -200,10 +217,22 @@ Then rerun the OpenClaw task. `resource_usage.monitor_source` should become
 
 ## 8. Troubleshooting
 
+If `openclaw config patch --stdin` fails with:
+
+```text
+Config validation failed: plugins: Unrecognized key: "hardware-scheduler"
+```
+
+you used the wrong config shape. Use
+`plugins.entries.hardware-scheduler.config`, as shown in section 3. Also run
+`openclaw plugins install --link ./packages/openclaw-plugin` and
+`openclaw plugins enable hardware-scheduler` before patching so the entry
+exists in OpenClaw's plugin registry.
+
 If `trace.jsonl` contains `tool_args: null` or `tool_result: null`:
 
-- Confirm `openclaw config get plugins.hardware-scheduler` shows
-  `recordRawTrace: true`.
+- Confirm `openclaw config get plugins.entries.hardware-scheduler.config --json`
+  shows `recordRawTrace: true`.
 - Rebuild and relink the plugin after code changes:
   `cd packages/openclaw-plugin && npm run build`, then rerun
   `openclaw plugins install --link ./packages/openclaw-plugin`.

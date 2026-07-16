@@ -90,14 +90,19 @@ Configure the plugin for real raw trace recording:
 cat <<'JSON5' | openclaw config patch --stdin
 {
   plugins: {
-    "hardware-scheduler": {
-      endpoint: "http://127.0.0.1:8765",
-      mode: "observe",
-      failOpen: true,
-      recordRawTrace: true,
-      executionBackend: "managed-wrapper",
-      launcherPath: "claw-launch",
-      securityBoundaryAccepted: true
+    entries: {
+      "hardware-scheduler": {
+        enabled: true,
+        config: {
+          endpoint: "http://127.0.0.1:8765",
+          mode: "observe",
+          failOpen: true,
+          recordRawTrace: true,
+          executionBackend: "managed-wrapper",
+          launcherPath: "claw-launch",
+          securityBoundaryAccepted: true
+        }
+      }
     }
   }
 }

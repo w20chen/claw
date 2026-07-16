@@ -23,12 +23,17 @@ For stronger `exec` resource attribution, use `managed-wrapper`:
 ```json5
 {
   plugins: {
-    "hardware-scheduler": {
-      endpoint: "http://127.0.0.1:8765",
-      recordRawTrace: true,
-      executionBackend: "managed-wrapper",
-      launcherPath: "claw-launch",
-      securityBoundaryAccepted: true
+    entries: {
+      "hardware-scheduler": {
+        enabled: true,
+        config: {
+          endpoint: "http://127.0.0.1:8765",
+          recordRawTrace: true,
+          executionBackend: "managed-wrapper",
+          launcherPath: "claw-launch",
+          securityBoundaryAccepted: true
+        }
+      }
     }
   }
 }
