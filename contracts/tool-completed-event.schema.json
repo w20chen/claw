@@ -6,11 +6,12 @@
     {"$ref": "common.schema.json"},
     {
       "type": "object",
-      "required": ["tool_call_id", "decision_id", "lease_id", "tool_name", "duration_ms", "succeeded", "error_type", "error_digest", "result_size_bytes"],
+      "required": ["tool_call_id", "decision_id", "lease_id", "execution_id", "tool_name", "duration_ms", "succeeded", "error_type", "error_digest", "result_size_bytes"],
       "properties": {
         "tool_call_id": {"type": ["string", "null"]},
         "decision_id": {"type": ["string", "null"]},
         "lease_id": {"type": ["string", "null"]},
+        "execution_id": {"type": ["string", "null"]},
         "tool_name": {"type": "string", "minLength": 1},
         "duration_ms": {"type": "integer", "minimum": 0},
         "succeeded": {"type": "boolean"},
@@ -20,11 +21,18 @@
         "resource_scope": {
           "type": ["object", "null"],
           "properties": {
+            "kind": {"enum": ["pid", "cgroup-v2"], "default": "pid"},
+            "execution_id": {"type": ["string", "null"]},
             "pid": {"type": ["integer", "null"], "minimum": 0},
+            "root_pid": {"type": ["integer", "null"], "minimum": 0},
             "process_start_time": {"type": ["number", "null"], "minimum": 0},
+            "root_starttime_ticks": {"type": ["number", "null"], "minimum": 0},
+            "cgroup_path": {"type": ["string", "null"]},
+            "pid_namespace_inode": {"type": ["integer", "null"], "minimum": 0},
             "container_id": {"type": ["string", "null"]},
             "include_children": {"type": "boolean", "default": true},
-            "source": {"type": ["string", "null"]}
+            "source": {"type": ["string", "null"]},
+            "attribution_source": {"type": ["string", "null"]}
           },
           "additionalProperties": false
         }

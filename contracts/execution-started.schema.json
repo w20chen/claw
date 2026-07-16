@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.ai/schemas/scheduler/execution-started.schema.json",
+  "type": "object",
+  "required": [
+    "update_token",
+    "launcher_pid",
+    "child_pid",
+    "process_starttime_ticks",
+    "cgroup_path",
+    "pid_namespace_inode",
+    "container_id"
+  ],
+  "properties": {
+    "update_token": {"type": "string", "minLength": 1},
+    "launcher_pid": {"type": "integer", "minimum": 0},
+    "child_pid": {"type": "integer", "minimum": 0},
+    "process_starttime_ticks": {"type": ["integer", "null"], "minimum": 0},
+    "cgroup_path": {"type": ["string", "null"]},
+    "pid_namespace_inode": {"type": ["integer", "null"], "minimum": 0},
+    "container_id": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}

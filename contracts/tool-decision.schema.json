@@ -32,7 +32,9 @@
         "advisory": {"const": true}
       },
       "additionalProperties": false
-    }
+    },
+    "placement": {},
+    "profiling": {}
   },
   "additionalProperties": false
 }

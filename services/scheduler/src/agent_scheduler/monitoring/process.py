@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from agent_scheduler.contracts.models import ResourceScope
@@ -38,6 +39,10 @@ class ProcessResourceSampler:
         mono = time.monotonic()
         if scope is None or scope.pid is None:
             return self._empty(now, mono, None, "unattributed")
+        if scope.kind == "cgroup-v2" and scope.cgroup_path:
+            cgroup = self._snapshot_cgroup(now, mono, scope)
+            if cgroup.available:
+                return cgroup
         if self._psutil is None:
             return self._empty(now, mono, scope.pid, "psutil-unavailable")
         try:
@@ -55,6 +60,117 @@ class ProcessResourceSampler:
             return self._snapshot_processes(now, mono, scope.pid, processes)
         except Exception:
             return self._empty(now, mono, scope.pid, "pid-unavailable")
+
+    def _snapshot_cgroup(
+        self,
+        now: float,
+        mono: float,
+        scope: ResourceScope,
+    ) -> ResourceSnapshot:
+        cgroup_path = Path(scope.cgroup_path or "")
+        cpu_usec = self._read_cgroup_cpu_usec(cgroup_path)
+        memory_current = self._read_int_file(cgroup_path / "memory.current")
+        io = self._read_cgroup_io_stat(cgroup_path)
+        pids = self._read_cgroup_pids(cgroup_path)
+        ctx_switches = self._aggregate_context_switches(pids)
+        return ResourceSnapshot(
+            captured_at=now,
+            monotonic_s=mono,
+            process_cpu_time_s=(cpu_usec / 1_000_000) if cpu_usec is not None else None,
+            rss_bytes=memory_current,
+            read_bytes=None if io is None else io[0],
+            write_bytes=None if io is None else io[1],
+            ctx_switches=ctx_switches,
+            target_pid=scope.root_pid or scope.pid,
+            process_count=len(pids) if pids else None,
+            available=any(
+                value is not None
+                for value in (cpu_usec, memory_current, io, ctx_switches)
+            ),
+            source="cgroup-v2",
+        )
+
+    @staticmethod
+    def _read_int_file(path: Path) -> int | None:
+        try:
+            return int(path.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            return None
+
+    @staticmethod
+    def _read_cgroup_cpu_usec(cgroup_path: Path) -> int | None:
+        try:
+            text = (cgroup_path / "cpu.stat").read_text(encoding="utf-8")
+        except OSError:
+            return None
+        for line in text.splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[0] == "usage_usec":
+                try:
+                    return int(parts[1])
+                except ValueError:
+                    return None
+        return None
+
+    @staticmethod
+    def _read_cgroup_io_stat(cgroup_path: Path) -> tuple[int, int] | None:
+        try:
+            text = (cgroup_path / "io.stat").read_text(encoding="utf-8")
+        except OSError:
+            return None
+        read_bytes = 0
+        write_bytes = 0
+        found = False
+        for line in text.splitlines():
+            for field in line.split():
+                key, sep, value = field.partition("=")
+                if sep != "=":
+                    continue
+                try:
+                    parsed = int(value)
+                except ValueError:
+                    continue
+                if key == "rbytes":
+                    read_bytes += parsed
+                    found = True
+                elif key == "wbytes":
+                    write_bytes += parsed
+                    found = True
+        return (read_bytes, write_bytes) if found else None
+
+    @staticmethod
+    def _read_cgroup_pids(cgroup_path: Path) -> list[int]:
+        try:
+            text = (cgroup_path / "cgroup.procs").read_text(encoding="utf-8")
+        except OSError:
+            return []
+        pids: list[int] = []
+        for line in text.splitlines():
+            try:
+                pids.append(int(line.strip()))
+            except ValueError:
+                pass
+        return pids
+
+    @staticmethod
+    def _aggregate_context_switches(pids: list[int]) -> int | None:
+        total = 0
+        found = False
+        for pid in pids:
+            try:
+                text = Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                key, sep, value = line.partition(":")
+                if sep != ":" or key not in {"voluntary_ctxt_switches", "nonvoluntary_ctxt_switches"}:
+                    continue
+                try:
+                    total += int(value.strip())
+                    found = True
+                except ValueError:
+                    pass
+        return total if found else None
 
     def _snapshot_processes(
         self,

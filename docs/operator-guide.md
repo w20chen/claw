@@ -1,6 +1,8 @@
 # Operator Guide
 
 This guide assumes a Linux host with Bash, Python 3.12, Node.js 24, and npm.
+For a shorter feature-by-feature demo with expected outputs, see
+[`supported-features.md`](supported-features.md).
 
 Example paths used below:
 
@@ -110,6 +112,15 @@ curl http://127.0.0.1:8765/health/ready
 
 The sidecar owns persistence, prediction, admission policy, runtime samples,
 and metrics. The OpenClaw plugin talks to it over local HTTP.
+
+Install also exposes the reference launcher console script:
+
+```bash
+claw-launch --help
+```
+
+The launcher is used only when the plugin is configured with
+`executionBackend: "managed-wrapper"`.
 
 ## 6. Optional Docker Compose Sidecar
 
@@ -249,6 +260,51 @@ The plugin sends metadata, feature counts, a parameter digest, and an
 `operation_hint` such as `pytest`, `grep`, or `git`. It does not send full
 prompts, model responses, tool output, credentials, or raw tool parameters by
 default.
+
+### Managed Wrapper Path
+
+For controlled `exec` attribution, configure the plugin:
+
+```json5
+{
+  plugins: {
+    "hardware-scheduler": {
+      endpoint: "http://127.0.0.1:8765",
+      executionBackend: "managed-wrapper",
+      launcherPath: "claw-launch",
+      securityBoundaryAccepted: true
+    }
+  }
+}
+```
+
+The runtime path becomes:
+
+```text
+before_tool_call
+  -> POST /v2/executions
+  -> OpenClaw exec runs claw-launch
+  -> claw-launch claims the spec
+  -> claw-launch runs /bin/sh -lc <original command>
+  -> claw-launch reports started/exited
+  -> after_tool_call asks the sidecar for the trusted scope
+```
+
+The current Python launcher registers PID scope and preserves stdin/stdout/
+stderr. On Linux, it can also create a per-execution cgroup and apply CPU
+placement when the scheduler returns a placement such as `cpu_set: "0-3"`.
+
+For a writable non-system test root:
+
+```bash
+export CLAW_CGROUP_ROOT=/sys/fs/cgroup/claw
+```
+
+The launcher writes `cpuset.mems` before `cpuset.cpus`, moves the child into
+the cgroup before `exec`, and calls `sched_setaffinity` as a second guard. If
+the cgroup path is unavailable or not writable, it falls back to PID scope
+without printing scheduler metadata to stdout/stderr. NUMA memory policy
+binding and PMU/ksys/VTune wrapping are still future launcher work.
 
 ## 9. Use Tool Profiles
 

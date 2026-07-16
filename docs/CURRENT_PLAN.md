@@ -1,5 +1,150 @@
 # Current Plan
 
+## 2026-07-17 CPU Placement In Reference Launcher
+
+- Continued after the reference launcher lifecycle work.
+- Implemented Linux-only, best-effort CPU placement in Python `claw-launch`:
+  - parses placement forms such as `cpu_set`, `cpus`, `numa_node`, and
+    `numa_nodes`
+  - accepts plugin-supplied profiling flags:
+    `enable_cgroup`, `enable_affinity`, and `enable_numa`
+  - creates a per-execution cgroup under `CLAW_CGROUP_ROOT` when configured
+  - writes `cpuset.mems` before `cpuset.cpus`
+  - moves the child process into the cgroup from `preexec_fn`, before shell
+    command `exec`
+  - applies `os.sched_setaffinity(0, cpus)` as a second CPU-placement guard
+  - reports the cgroup path to the sidecar so runtime samples can use
+    cgroup-v2 accounting
+  - falls back to PID scope when cgroup setup is disabled, unavailable, or not
+    writable
+- Kept scheduler metadata off stdout/stderr.
+- Still not complete:
+  - NUMA memory policy binding via `set_mempolicy`/`numactl`
+  - hardened cleanup for daemonized/background subprocesses
+  - Rust/Go static launcher
+  - PMU/ksys/VTune wrapping
+  - topology-aware policy that actively chooses CPU sets
+
+### Validation
+
+- Passed: `cd services/scheduler && pytest tests\test_launcher.py -q`
+  - 4 tests passed.
+- Passed: `cd services/scheduler && pytest tests -q`
+  - 18 tests passed.
+
+## 2026-07-16 Reference Launcher And Execution Lifecycle
+
+- Used `agent-test-bench` as a read-only reference source:
+  - `src/agents/openclaw/tools/shell.py` for subprocess launch, process tree
+    sampling, and signal/timeout behavior.
+  - `src/harness/container_stats_sampler.py` for cgroup-v2 file parsing
+    patterns.
+- Could not implement the preferred Rust/Go static launcher in this environment:
+  - `cargo --version` failed: `cargo` is not installed.
+  - `go version` failed: `go` is not installed.
+- Implemented a Python reference launcher instead:
+  - console script: `claw-launch = agent_scheduler.launcher:main`
+  - claims one-time execution specs from the sidecar
+  - runs `/bin/sh -lc <original command>` on POSIX
+  - preserves inherited stdin/stdout/stderr
+  - forwards `SIGINT`, `SIGTERM`, and `SIGHUP` to the child process group
+  - returns the original process exit code
+  - reports child PID, process starttime ticks, PID namespace inode, and exit
+    status to the sidecar
+- Extended scheduler v2 execution lifecycle:
+  - `POST /v2/executions/claim`
+  - `POST /v2/executions/{execution_id}/started`
+  - `POST /v2/executions/{execution_id}/exited`
+  - `GET /v2/executions/{execution_id}/scope`
+- One-time execution token is consumed by claim. A separate `update_token` is
+  returned for started/exited lifecycle updates.
+- Added direct cgroup-v2 resource sampling when a trusted scope includes
+  `kind: "cgroup-v2"` and `cgroup_path`.
+- Added JSON Schemas and examples for execution claim, started, and exited
+  messages.
+- Current limitation:
+  - Python reference launcher registers PID scope by default.
+  - It does not yet create per-tool cgroups, set cpuset.cpus/cpuset.mems,
+    call `sched_setaffinity`, bind NUMA policy, or run PMU/ksys/VTune.
+
+### Validation
+
+- Passed: `cd services/scheduler && pytest tests -q`
+  - 15 tests passed.
+- Passed: `pytest tests -q --basetemp .pytest-tmp-root`
+  - 3 tests passed.
+- Passed: `python tools\validate_contracts.py`
+- Passed: `cd packages/openclaw-plugin && npm.cmd test`
+  - 4 Node tests passed.
+- Passed: `cd packages/openclaw-plugin && npm.cmd run typecheck`
+- Passed: `cd services/scheduler && $env:PYTHONPATH='src'; python -m agent_scheduler.launcher --help`
+
+## 2026-07-16 Execution Backend Refactor
+
+- Accepted the new project boundary: OpenClaw plugin remains the deliverable,
+  while runtime execution is designed as TypeScript hook + scheduler sidecar +
+  host launcher/collector.
+- Implemented P0 correctness fixes:
+  - `failOpen=false` now returns the hook-compatible `{block: true,
+    blockReason: ...}` shape.
+  - Removed fuzzy recursive PID discovery from hook payloads.
+  - Correlation state now carries `execution_id`.
+  - `before_tool_call` can return rewritten `params`.
+- Added `executionBackend` config:
+  - `hook-only`
+  - `marker`
+  - `managed-wrapper`
+- Added marker env injection for built-in `exec`:
+  - `CLAW_EXECUTION_ID`
+  - `CLAW_TOOL_CALL_ID`
+  - `CLAW_RUN_ID`
+  - `CLAW_SESSION_KEY_HASH`
+  - `CLAW_COMMAND_DIGEST`
+- Added managed-wrapper command rewrite:
+  - OpenClaw runs `launcherPath run --execution-id ... --token ...`.
+  - Original command is sent to sidecar execution registration, not shell-quoted
+    into the launcher command.
+  - `managed-wrapper` requires `securityBoundaryAccepted=true`.
+- Added sidecar v2 execution registration protocol:
+  - `POST /v2/executions`
+  - `GET /v2/executions/{execution_id}/scope`
+  - One-time execution tokens are held in memory and are not persisted to
+    SQLite.
+- Added `execution-registration.schema.json` and updated resource scope schema
+  fields for cgroup-v2-oriented attribution.
+- Not implemented yet:
+  - `claw-launch` host binary.
+  - Unix socket launcher claim/start protocol.
+  - Actual cgroup creation, CPU affinity, NUMA binding, PMU/ksys/VTune.
+
+### Validation
+
+- Passed: `python tools\validate_contracts.py`
+- Passed: `cd packages/openclaw-plugin && npm.cmd run typecheck`
+- Passed: `cd packages/openclaw-plugin && npm.cmd test`
+  - 4 Node tests passed.
+- Passed: `cd services/scheduler && pytest tests -q`
+  - 13 tests passed.
+- Passed: `cd services/scheduler && pytest tests\test_sidecar.py -q`
+  - 3 tests passed.
+- Passed with workaround: `pytest tests -q --basetemp .pytest-tmp-root`
+  - 3 tests passed.
+- Could not run as typed: `cd packages/openclaw-plugin && npm run typecheck`
+  - Reason: PowerShell blocks the `npm.ps1` shim under the current execution
+    policy.
+  - Workaround used: `npm.cmd run typecheck`.
+- Could not run from repository root as typed:
+  `pytest services\scheduler\tests\test_sidecar.py -q`
+  - Reason: scheduler pyproject config sets `--basetemp ../../.pytest-tmp`;
+    from the repository root this resolves outside the workspace to
+    `C:\Users\29068\.pytest-tmp`, which is not writable in this sandbox.
+  - Workaround used: run from `services/scheduler`.
+- Could not run without basetemp override: `pytest tests -q`
+  - Reason: pytest attempted to scan
+    `C:\Users\29068\AppData\Local\Temp\pytest-of-29068`, which is not readable
+    in this sandbox.
+  - Workaround used: `pytest tests -q --basetemp .pytest-tmp-root`.
+
 ## 2026-07-16 Linux-Default Review
 
 - Updated repository defaults and docs to assume a Linux operator machine.

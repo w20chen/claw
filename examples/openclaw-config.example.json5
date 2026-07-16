@@ -8,7 +8,22 @@
       failOpen: true,
       sendRawParams: false,
       authTokenEnv: "OPENCLAW_SCHEDULER_TOKEN",
-      logLevel: "info"
+      logLevel: "info",
+
+      // hook-only: observe/report without changing exec params.
+      // marker: inject CLAW_* env markers into built-in exec.
+      // managed-wrapper: rewrite exec command to launcherPath; requires
+      // securityBoundaryAccepted=true and a deployed claw-launch binary.
+      executionBackend: "hook-only",
+      launcherPath: "/opt/claw/bin/claw-launch",
+      collectorSocket: "/run/claw/collector.sock",
+      instrumentHosts: ["gateway"],
+      instrumentTools: ["exec"],
+      enableCgroup: true,
+      enableAffinity: true,
+      enableNuma: true,
+      profilingMode: "off",
+      securityBoundaryAccepted: false
     }
   }
 }

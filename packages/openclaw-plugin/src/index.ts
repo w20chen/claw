@@ -3,7 +3,8 @@ import {randomUUID} from "node:crypto";
 import {SidecarClient} from "./client.js";
 import {loadConfig, isRecord} from "./config.js";
 import {CorrelationMap} from "./correlation.js";
-import type {CommonEvent, ResourceScope, ToolBeforeRequest, ToolCompletedEvent} from "./contracts.js";
+import type {CommonEvent, ToolBeforeRequest, ToolCompletedEvent} from "./contracts.js";
+import {buildTrustedResourceScope, instrumentExecParams} from "./exec-instrumentation.js";
 import {consoleLogger} from "./logging.js";
 import {paramFeatures, redact, stableDigest} from "./redaction.js";
 
@@ -24,7 +25,17 @@ export default definePluginEntry({
       failOpen: {type: "boolean", default: true},
       sendRawParams: {type: "boolean", default: false},
       authTokenEnv: {type: "string", default: "OPENCLAW_SCHEDULER_TOKEN"},
-      logLevel: {enum: ["error", "warn", "info", "debug"], default: "info"}
+      logLevel: {enum: ["error", "warn", "info", "debug"], default: "info"},
+      executionBackend: {enum: ["hook-only", "marker", "managed-wrapper"], default: "hook-only"},
+      launcherPath: {type: "string", default: "/opt/claw/bin/claw-launch"},
+      collectorSocket: {type: "string", default: "/run/claw/collector.sock"},
+      instrumentHosts: {type: "array", items: {type: "string"}, default: ["gateway"]},
+      instrumentTools: {type: "array", items: {type: "string"}, default: ["exec"]},
+      enableCgroup: {type: "boolean", default: true},
+      enableAffinity: {type: "boolean", default: true},
+      enableNuma: {type: "boolean", default: true},
+      profilingMode: {enum: ["off", "proc", "perf", "ksys", "vtune"], default: "off"},
+      securityBoundaryAccepted: {type: "boolean", default: false}
     }
   },
   register(api: HookApi): void {
@@ -36,24 +47,24 @@ export default definePluginEntry({
   api.on("before_tool_call", async (event: unknown, context: unknown) => {
     const payload = buildToolBefore(event, config.sendRawParams);
     mergeContext(payload, context);
-    payload.resource_scope = buildResourceScope(event, context);
+    payload.resource_scope = buildTrustedResourceScope(event, context);
     try {
       const decision = await client.decide(payload);
-      correlation.set(payload.tool_call_id, decision.decision_id, decision.lease_id);
       if (config.mode === "enforce" && decision.action === "block") {
         return {
           block: true,
           blockReason: decision.reason
         };
       }
-      return undefined;
+      const instrumentation = await instrumentExecParams(event, context, payload, decision, client, config);
+      correlation.set(payload.tool_call_id, decision.decision_id, decision.lease_id, instrumentation.executionId);
+      return instrumentation.params === null ? undefined : {params: instrumentation.params};
     } catch (error) {
       logger.warn("hardware scheduler decision failed", classifyError(error));
       if (config.mode === "observe" || config.failOpen) return undefined;
       return {
-        action: "block",
-        blockReason: "Hardware scheduler sidecar unavailable and failOpen=false.",
-        reasonCode: "sidecar_unavailable"
+        block: true,
+        blockReason: "Hardware scheduler sidecar unavailable and failOpen=false."
       };
     }
   });
@@ -61,7 +72,14 @@ export default definePluginEntry({
   api.on("after_tool_call", async (event: unknown, context: unknown) => {
     const completion = buildCompletion(event, correlation.take(extractString(event, ["tool_call_id", "toolCallId", "id"])));
     mergeContext(completion, context);
-    completion.resource_scope = buildResourceScope(event, context);
+    completion.resource_scope = buildTrustedResourceScope(event, context);
+    if (completion.resource_scope === null && completion.execution_id !== null) {
+      try {
+        completion.resource_scope = await client.getExecutionScope(completion.execution_id);
+      } catch (error) {
+        logger.warn("hardware scheduler execution scope lookup failed", classifyError(error));
+      }
+    }
     try {
       await client.reportCompletion(completion);
     } catch (error) {
@@ -229,7 +247,7 @@ function mergeContext(payload: CommonEvent, context: unknown): void {
 
 function buildCompletion(
   event: unknown,
-  prior: {decisionId: string | null; leaseId: string | null} | null
+  prior: {decisionId: string | null; leaseId: string | null; executionId: string | null} | null
 ): ToolCompletedEvent {
   const errorType = extractString(event, ["error_type", "errorType"]);
   return {
@@ -237,6 +255,7 @@ function buildCompletion(
     tool_call_id: extractString(event, ["tool_call_id", "toolCallId", "id"]),
     decision_id: prior?.decisionId ?? null,
     lease_id: prior?.leaseId ?? null,
+    execution_id: prior?.executionId ?? null,
     tool_name: extractString(event, ["tool_name", "toolName", "name"]) ?? "unknown",
     duration_ms: extractNumber(event, ["duration_ms", "durationMs"]) ?? 0,
     succeeded: extractBoolean(event, ["succeeded", "success"]) ?? errorType === null,
@@ -244,33 +263,6 @@ function buildCompletion(
     error_digest: null,
     result_size_bytes: extractNumber(event, ["result_size_bytes", "resultSizeBytes"]),
     resource_scope: null
-  };
-}
-
-function buildResourceScope(event: unknown, context: unknown): ResourceScope | null {
-  const pid = extractNumberDeep([event, context], [
-    "pid",
-    "process_id",
-    "processId",
-    "tool_pid",
-    "toolPid",
-    "child_pid",
-    "childPid"
-  ]);
-  const processStartTime = extractFiniteNumberDeep([event, context], [
-    "process_start_time",
-    "processStartTime",
-    "create_time",
-    "createTime"
-  ]);
-  const containerId = extractStringDeep([event, context], ["container_id", "containerId"]);
-  if (pid === null && processStartTime === null && containerId === null) return null;
-  return {
-    pid,
-    process_start_time: processStartTime,
-    container_id: containerId,
-    include_children: true,
-    source: "openclaw-hook"
   };
 }
 
@@ -307,43 +299,6 @@ function extractNumber(value: unknown, keys: string[]): number | null {
     if (typeof item === "number" && Number.isFinite(item) && item >= 0) return Math.floor(item);
   }
   return null;
-}
-
-function extractNumberDeep(values: unknown[], keys: string[]): number | null {
-  const value = extractDeep(values, keys);
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : null;
-}
-
-function extractFiniteNumberDeep(values: unknown[], keys: string[]): number | null {
-  const value = extractDeep(values, keys);
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
-}
-
-function extractStringDeep(values: unknown[], keys: string[]): string | null {
-  const value = extractDeep(values, keys);
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function extractDeep(values: unknown[], keys: string[]): unknown {
-  for (const value of values) {
-    const found = findDeep(value, new Set(keys), 0);
-    if (found !== undefined) return found;
-  }
-  return undefined;
-}
-
-function findDeep(value: unknown, keys: Set<string>, depth: number): unknown {
-  if (!isRecord(value) || depth > 4) return undefined;
-  for (const key of keys) {
-    if (Object.prototype.hasOwnProperty.call(value, key)) return value[key];
-  }
-  for (const item of Object.values(value)) {
-    if (isRecord(item)) {
-      const found = findDeep(item, keys, depth + 1);
-      if (found !== undefined) return found;
-    }
-  }
-  return undefined;
 }
 
 function extractBoolean(value: unknown, keys: string[]): boolean | null {

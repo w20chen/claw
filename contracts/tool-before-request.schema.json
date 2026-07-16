@@ -32,11 +32,18 @@
         "resource_scope": {
           "type": ["object", "null"],
           "properties": {
+            "kind": {"enum": ["pid", "cgroup-v2"], "default": "pid"},
+            "execution_id": {"type": ["string", "null"]},
             "pid": {"type": ["integer", "null"], "minimum": 0},
+            "root_pid": {"type": ["integer", "null"], "minimum": 0},
             "process_start_time": {"type": ["number", "null"], "minimum": 0},
+            "root_starttime_ticks": {"type": ["number", "null"], "minimum": 0},
+            "cgroup_path": {"type": ["string", "null"]},
+            "pid_namespace_inode": {"type": ["integer", "null"], "minimum": 0},
             "container_id": {"type": ["string", "null"]},
             "include_children": {"type": "boolean", "default": true},
-            "source": {"type": ["string", "null"]}
+            "source": {"type": ["string", "null"]},
+            "attribution_source": {"type": ["string", "null"]}
           },
           "additionalProperties": false
         }

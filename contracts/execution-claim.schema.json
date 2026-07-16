@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.ai/schemas/scheduler/execution-claim.schema.json",
+  "type": "object",
+  "required": ["execution_id", "token", "launcher_pid"],
+  "properties": {
+    "execution_id": {"type": "string", "minLength": 1},
+    "token": {"type": "string", "minLength": 1},
+    "launcher_pid": {"type": ["integer", "null"], "minimum": 0}
+  },
+  "additionalProperties": false
+}

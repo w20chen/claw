@@ -10,6 +10,7 @@
   "tool_call_id": "call-1",
   "decision_id": "decision-1",
   "lease_id": null,
+  "execution_id": null,
   "tool_name": "exec",
   "duration_ms": 1000,
   "succeeded": true,

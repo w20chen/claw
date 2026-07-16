@@ -1,4 +1,12 @@
-import type {PluginConfig, ToolBeforeRequest, ToolCompletedEvent, ToolDecision} from "./contracts.js";
+import type {
+  ExecutionRegistrationRequest,
+  ExecutionRegistrationResponse,
+  PluginConfig,
+  ResourceScope,
+  ToolBeforeRequest,
+  ToolCompletedEvent,
+  ToolDecision
+} from "./contracts.js";
 
 export class SidecarClient {
   constructor(private readonly config: PluginConfig) {}
@@ -15,7 +23,27 @@ export class SidecarClient {
     await this.post<unknown>("/v1/events/model", payload, this.config.reportTimeoutMs);
   }
 
+  async registerExecution(payload: ExecutionRegistrationRequest): Promise<ExecutionRegistrationResponse> {
+    return this.post<ExecutionRegistrationResponse>("/v2/executions", payload, this.config.decisionTimeoutMs);
+  }
+
+  async getExecutionScope(executionId: string): Promise<ResourceScope | null> {
+    const response = await this.get<{execution_scope: ResourceScope | null}>(
+      `/v2/executions/${encodeURIComponent(executionId)}/scope`,
+      this.config.reportTimeoutMs
+    );
+    return response.execution_scope;
+  }
+
   private async post<T>(path: string, payload: unknown, timeoutMs: number): Promise<T> {
+    return this.request<T>(path, {method: "POST", body: JSON.stringify(payload)}, timeoutMs);
+  }
+
+  private async get<T>(path: string, timeoutMs: number): Promise<T> {
+    return this.request<T>(path, {method: "GET"}, timeoutMs);
+  }
+
+  private async request<T>(path: string, init: RequestInit, timeoutMs: number): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -23,9 +51,8 @@ export class SidecarClient {
       const token = process.env[this.config.authTokenEnv];
       if (token) headers.authorization = `Bearer ${token}`;
       const response = await fetch(`${this.config.endpoint}${path}`, {
-        method: "POST",
+        ...init,
         headers,
-        body: JSON.stringify(payload),
         signal: controller.signal
       });
       if (!response.ok) {

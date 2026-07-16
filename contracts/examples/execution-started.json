@@ -1,0 +1,9 @@
+{
+  "update_token": "update-token",
+  "launcher_pid": 12000,
+  "child_pid": 12001,
+  "process_starttime_ticks": 91234123,
+  "cgroup_path": null,
+  "pid_namespace_inode": 4026531836,
+  "container_id": null
+}

@@ -1,6 +1,7 @@
 type Entry = {
   decisionId: string | null;
   leaseId: string | null;
+  executionId: string | null;
   expiresAt: number;
 };
 
@@ -9,14 +10,14 @@ export class CorrelationMap {
 
   constructor(private readonly ttlMs: number, private readonly maxEntries: number) {}
 
-  set(toolCallId: string | null, decisionId: string | null, leaseId: string | null): void {
+  set(toolCallId: string | null, decisionId: string | null, leaseId: string | null, executionId: string | null = null): void {
     if (!toolCallId) return;
     this.sweep();
     if (this.entries.size >= this.maxEntries) {
       const first = this.entries.keys().next().value;
       if (first) this.entries.delete(first);
     }
-    this.entries.set(toolCallId, {decisionId, leaseId, expiresAt: Date.now() + this.ttlMs});
+    this.entries.set(toolCallId, {decisionId, leaseId, executionId, expiresAt: Date.now() + this.ttlMs});
   }
 
   take(toolCallId: string | null): Entry | null {

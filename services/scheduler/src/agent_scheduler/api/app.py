@@ -7,6 +7,14 @@ from fastapi.responses import PlainTextResponse
 
 from agent_scheduler.api.dependencies import AppState, build_state
 from agent_scheduler.contracts.models import (
+    ExecutionClaimRequest,
+    ExecutionClaimResponse,
+    ExecutionExitedRequest,
+    ExecutionRegistrationRequest,
+    ExecutionRegistrationResponse,
+    ExecutionScopeResponse,
+    ExecutionStartedRequest,
+    ExecutionUpdateResponse,
     ModelEvent,
     PlacementAdvice,
     StatusResponse,
@@ -102,5 +110,47 @@ def create_app(state: AppState | None = None) -> FastAPI:
     ) -> dict[str, bool]:
         s.store.save_model_event(event)
         return {"stored": True}
+
+    @app.post("/v2/executions", response_model=ExecutionRegistrationResponse)
+    async def register_execution(
+        request: ExecutionRegistrationRequest,
+        s: AppState = Depends(get_state),
+        _: None = Depends(auth),
+    ) -> ExecutionRegistrationResponse:
+        return s.executions.register(request)
+
+    @app.get("/v2/executions/{execution_id}/scope", response_model=ExecutionScopeResponse)
+    async def execution_scope(
+        execution_id: str,
+        s: AppState = Depends(get_state),
+        _: None = Depends(auth),
+    ) -> ExecutionScopeResponse:
+        return ExecutionScopeResponse(execution_scope=s.executions.scope(execution_id))
+
+    @app.post("/v2/executions/claim", response_model=ExecutionClaimResponse)
+    async def claim_execution(
+        request: ExecutionClaimRequest,
+        s: AppState = Depends(get_state),
+        _: None = Depends(auth),
+    ) -> ExecutionClaimResponse:
+        return s.executions.claim(request)
+
+    @app.post("/v2/executions/{execution_id}/started", response_model=ExecutionUpdateResponse)
+    async def execution_started(
+        execution_id: str,
+        request: ExecutionStartedRequest,
+        s: AppState = Depends(get_state),
+        _: None = Depends(auth),
+    ) -> ExecutionUpdateResponse:
+        return s.executions.started(execution_id, request)
+
+    @app.post("/v2/executions/{execution_id}/exited", response_model=ExecutionUpdateResponse)
+    async def execution_exited(
+        execution_id: str,
+        request: ExecutionExitedRequest,
+        s: AppState = Depends(get_state),
+        _: None = Depends(auth),
+    ) -> ExecutionUpdateResponse:
+        return s.executions.exited(execution_id, request)
 
     return app

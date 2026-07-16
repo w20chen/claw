@@ -137,6 +137,8 @@ def _delta_float(start: float | None, end: float | None) -> float | None:
 def _attribution_status(start: ResourceSnapshot, end: ResourceSnapshot) -> str:
     if start.target_pid is None and end.target_pid is None:
         return "unattributed"
+    if start.source == "cgroup-v2" or end.source == "cgroup-v2":
+        return "cgroup-v2"
     if start.available and end.available:
         return "pid"
     return "pid-unavailable"

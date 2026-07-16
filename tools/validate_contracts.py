@@ -18,6 +18,10 @@ EXAMPLES = {
     "tool-completed-event.schema.json": "tool-completed-event.json",
     "model-event.schema.json": "model-event.json",
     "tool-profile.schema.json": "tool-profiles.example.json",
+    "execution-registration.schema.json": "execution-registration.json",
+    "execution-claim.schema.json": "execution-claim.json",
+    "execution-started.schema.json": "execution-started.json",
+    "execution-exited.schema.json": "execution-exited.json",
 }
 
 

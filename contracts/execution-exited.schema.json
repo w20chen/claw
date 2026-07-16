@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.ai/schemas/scheduler/execution-exited.schema.json",
+  "type": "object",
+  "required": ["update_token", "exit_code", "signal"],
+  "properties": {
+    "update_token": {"type": "string", "minLength": 1},
+    "exit_code": {"type": ["integer", "null"]},
+    "signal": {"type": ["integer", "null"], "minimum": 0}
+  },
+  "additionalProperties": false
+}

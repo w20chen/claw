@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from agent_scheduler.admission.leases import LeaseManager
 from agent_scheduler.calibration.ewma import EWMACalibrator
 from agent_scheduler.config import SchedulerConfig
+from agent_scheduler.executions import ExecutionRegistry
 from agent_scheduler.monitoring.tool_runtime import RealtimeToolMonitor
 from agent_scheduler.policies.base import SchedulingPolicy
 from agent_scheduler.policies.concurrency import ConcurrencyPolicy
@@ -24,6 +25,7 @@ class AppState:
     policy: SchedulingPolicy
     calibrator: EWMACalibrator
     tool_monitor: RealtimeToolMonitor
+    executions: ExecutionRegistry
     metrics: Metrics
     topology: dict
 
@@ -47,6 +49,7 @@ def build_state(config: SchedulerConfig | None = None) -> AppState:
         policy=policy,
         calibrator=EWMACalibrator(store, cfg),
         tool_monitor=RealtimeToolMonitor(),
+        executions=ExecutionRegistry(),
         metrics=Metrics(),
         topology=read_topology(),
     )

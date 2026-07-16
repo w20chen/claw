@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.ai/schemas/scheduler/execution-registration.schema.json",
+  "type": "object",
+  "required": [
+    "execution_id",
+    "tool_call_id",
+    "run_id",
+    "session_key_hash",
+    "command_digest",
+    "command",
+    "workdir",
+    "host",
+    "placement",
+    "profiling",
+    "backend"
+  ],
+  "properties": {
+    "execution_id": {"type": "string", "minLength": 1},
+    "tool_call_id": {"type": ["string", "null"]},
+    "run_id": {"type": ["string", "null"]},
+    "session_key_hash": {"type": ["string", "null"], "pattern": "^(sha256:[a-f0-9]{64})?$"},
+    "command_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "command": {"type": "string", "minLength": 1},
+    "workdir": {"type": ["string", "null"]},
+    "host": {"type": "string", "minLength": 1},
+    "placement": {},
+    "profiling": {},
+    "backend": {"enum": ["marker", "managed-wrapper"]}
+  },
+  "additionalProperties": false
+}

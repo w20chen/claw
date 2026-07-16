@@ -60,6 +60,7 @@ def test_decision_and_completion_round_trip(tmp_path: Path) -> None:
         "tool_call_id": "call-1",
         "decision_id": decision["decision_id"],
         "lease_id": decision["lease_id"],
+        "execution_id": None,
         "tool_name": "exec",
         "duration_ms": 100,
         "succeeded": True,
@@ -115,3 +116,92 @@ def test_metrics_endpoint(tmp_path: Path) -> None:
     assert "scheduler_tool_cpu_seconds_total" in response.text
     assert "scheduler_tool_memory_rss_bytes" in response.text
     assert "scheduler_tool_process_count" in response.text
+
+
+def test_execution_registration_round_trip(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    response = client.post(
+        "/v2/executions",
+        json={
+            "execution_id": "exec-1",
+            "tool_call_id": "call-1",
+            "run_id": "run-1",
+            "session_key_hash": "sha256:" + "a" * 64,
+            "command_digest": "sha256:" + "b" * 64,
+            "command": "pytest tests -q",
+            "workdir": "/workspace",
+            "host": "gateway",
+            "placement": {"cpu_set": None, "numa_node": None, "llc_cluster": None, "advisory": True},
+            "profiling": {"mode": "off"},
+            "backend": "marker",
+        },
+    )
+    assert response.status_code == 200
+    registration = response.json()
+    assert registration["execution_id"] == "exec-1"
+    assert registration["one_time_token"]
+    assert registration["expires_at"].endswith("Z")
+
+    claim = client.post(
+        "/v2/executions/claim",
+        json={
+            "execution_id": "exec-1",
+            "token": registration["one_time_token"],
+            "launcher_pid": 100,
+        },
+    )
+    assert claim.status_code == 200
+    spec = claim.json()
+    assert spec["execution_id"] == "exec-1"
+    assert spec["command"] == "pytest tests -q"
+    assert spec["workdir"] == "/workspace"
+    assert spec["update_token"]
+
+    duplicate_claim = client.post(
+        "/v2/executions/claim",
+        json={
+            "execution_id": "exec-1",
+            "token": registration["one_time_token"],
+            "launcher_pid": 100,
+        },
+    )
+    assert duplicate_claim.status_code == 409
+
+    started = client.post(
+        "/v2/executions/exec-1/started",
+        json={
+            "update_token": spec["update_token"],
+            "launcher_pid": 100,
+            "child_pid": 101,
+            "process_starttime_ticks": 12345,
+            "cgroup_path": None,
+            "pid_namespace_inode": 4026531836,
+            "container_id": None,
+        },
+    )
+    assert started.status_code == 200
+    assert started.json() == {"stored": True}
+
+    scope = client.get("/v2/executions/exec-1/scope")
+    assert scope.status_code == 200
+    assert scope.json()["execution_scope"] == {
+        "kind": "pid",
+        "execution_id": "exec-1",
+        "pid": 101,
+        "root_pid": 101,
+        "process_start_time": None,
+        "root_starttime_ticks": 12345.0,
+        "cgroup_path": None,
+        "pid_namespace_inode": 4026531836,
+        "container_id": None,
+        "include_children": True,
+        "source": "claw-launch",
+        "attribution_source": "claw-launch",
+    }
+
+    exited = client.post(
+        "/v2/executions/exec-1/exited",
+        json={"update_token": spec["update_token"], "exit_code": 0, "signal": None},
+    )
+    assert exited.status_code == 200
+    assert exited.json() == {"stored": True}
