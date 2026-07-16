@@ -149,25 +149,30 @@ but OS resource usage may be `unattributed`.
 - Launcher command missing or stale: rerun
   `python3 -m pip install -e 'services/scheduler[dev]'`, then re-export
   `CLAW_LAUNCHER_PATH="$(command -v claw-launch)"`.
-- Config or environment changes: rerun `openclaw config patch --stdin` or
-  re-export the `OPENCLAW_HARDWARE_SCHEDULER_*` variables before starting the
-  next `openclaw agent --local` command. Gateway users should restart Gateway.
+- Config changes: rerun `openclaw config patch --stdin` for plugin settings,
+  or edit `.env` and restart the sidecar for sidecar/proxy settings. Gateway
+  users should restart Gateway after plugin config changes.
 
 ## 4. Start The Sidecar Trace Writer
 
 Terminal 1:
 
 ```bash
+cd ~/claw
+cp .env.example .env
+
 cd ~/claw/services/scheduler
-export PYTHONPATH=src
-export AGENT_SCHEDULER_DB_PATH=../../data/openclaw-trace.sqlite3
-export AGENT_SCHEDULER_TRACE_PATH=../../data/trace.jsonl
-export AGENT_SCHEDULER_RESOURCE_POLL_INTERVAL_MS=50
-export AGENT_SCHEDULER_RESOURCE_TIMELINE_MAX_POINTS=2000
-export AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL=https://api.deepseek.com/v1
-export AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY="$DEEPSEEK_API_KEY"
 python3 -m agent_scheduler.main --host 127.0.0.1 --port 8765
 ```
+
+The sidecar loads `.env` automatically from the repository root. The default
+`.env.example` writes to `data/openclaw-trace.sqlite3` and `data/trace.jsonl`.
+DeepSeek is the built-in upstream default, so you do not need to set its URL.
+Do not duplicate the API key if OpenClaw already stores it; the proxy forwards
+OpenClaw's `Authorization` header. Set `AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL`
+only for another OpenAI-compatible upstream, and set
+`AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY` only if OpenClaw does not send auth to
+the proxy.
 
 Check health from another shell:
 
@@ -187,25 +192,18 @@ For OpenAI-compatible providers, the sidecar exposes `/v1/models` and
 `AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL`, and records the full request/response
 into `trace.jsonl`.
 
-## 5. Export Plugin Runtime Overrides
+## 5. Confirm Persistent Plugin Config
 
-Your latest run showed that OpenClaw accepted the config patch but the hook-only
-plugin still behaved as if it had default config. To make the real run
-unambiguous, export these variables in the shell that runs `openclaw agent`.
-The plugin reads them directly as a fallback when `api.pluginConfig` is not
-populated:
+The plugin settings are stored in OpenClaw config by section 3. Confirm them
+before running:
 
 ```bash
-export OPENCLAW_HARDWARE_SCHEDULER_ENDPOINT=http://127.0.0.1:8765
-export OPENCLAW_HARDWARE_SCHEDULER_RECORD_RAW_TRACE=true
-export OPENCLAW_HARDWARE_SCHEDULER_EXECUTION_BACKEND=managed-wrapper
-export OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH="$CLAW_LAUNCHER_PATH"
-export OPENCLAW_HARDWARE_SCHEDULER_SECURITY_BOUNDARY_ACCEPTED=true
+openclaw config get plugins.entries.hardware-scheduler.config --json
 ```
 
-For a long-lived Gateway service, put equivalent values into the Gateway
-environment before restarting it. For `openclaw agent --local`, exporting them
-in the current shell is enough.
+If your OpenClaw runtime still ignores plugin config, use
+`OPENCLAW_HARDWARE_SCHEDULER_*` environment overrides as a fallback. The normal
+path should not require repeating those exports.
 
 ## 6. Run A Real OpenClaw Task
 

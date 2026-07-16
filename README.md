@@ -75,12 +75,9 @@ cd ../..
 Start the sidecar:
 
 ```bash
+cp .env.example .env
+
 cd services/scheduler
-export PYTHONPATH=src
-export AGENT_SCHEDULER_DB_PATH=../../data/scheduler.sqlite3
-export AGENT_SCHEDULER_TRACE_PATH=../../data/trace.jsonl
-export AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL=https://api.deepseek.com/v1
-export AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY="$DEEPSEEK_API_KEY"
 python3 -m agent_scheduler.main --host 127.0.0.1 --port 8765
 ```
 
@@ -89,6 +86,11 @@ Configure your OpenClaw model provider base URL to the sidecar proxy:
 ```bash
 http://127.0.0.1:8765/v1
 ```
+
+The proxy forwards OpenClaw's `Authorization` header by default, so provider
+keys already stored by OpenClaw do not need to be duplicated in `.env`.
+DeepSeek's upstream URL is the built-in default; edit `.env` only for another
+OpenAI-compatible upstream.
 
 Link the plugin:
 
@@ -101,9 +103,6 @@ openclaw plugins inspect hardware-scheduler --runtime --json
 Configure the plugin for real raw trace recording:
 
 ```bash
-export CLAW_LAUNCHER_PATH="$(command -v claw-launch)"
-test -n "$CLAW_LAUNCHER_PATH"
-
 cat <<JSON5 | openclaw config patch --stdin
 {
   plugins: {
@@ -116,7 +115,7 @@ cat <<JSON5 | openclaw config patch --stdin
           failOpen: true,
           recordRawTrace: true,
           executionBackend: "managed-wrapper",
-          launcherPath: "$CLAW_LAUNCHER_PATH",
+          launcherPath: "$(command -v claw-launch)",
           securityBoundaryAccepted: true
         }
       }
@@ -129,12 +128,6 @@ JSON5
 Run a real OpenClaw task and inspect outputs:
 
 ```bash
-export OPENCLAW_HARDWARE_SCHEDULER_ENDPOINT=http://127.0.0.1:8765
-export OPENCLAW_HARDWARE_SCHEDULER_RECORD_RAW_TRACE=true
-export OPENCLAW_HARDWARE_SCHEDULER_EXECUTION_BACKEND=managed-wrapper
-export OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH="$CLAW_LAUNCHER_PATH"
-export OPENCLAW_HARDWARE_SCHEDULER_SECURITY_BOUNDARY_ACCEPTED=true
-
 openclaw models list
 export OPENCLAW_TEST_MODEL='<provider/model-from-openclaw-models-list>'
 openclaw agent --local --agent main --model "$OPENCLAW_TEST_MODEL" \
@@ -153,11 +146,14 @@ PowerShell note: use `npm.cmd` and `openclaw.cmd` if `.ps1` shims are blocked.
 
 Sidecar:
 
+- `.env`: default sidecar config file, loaded automatically from the repo root
+  or from `AGENT_SCHEDULER_ENV_FILE`.
 - `AGENT_SCHEDULER_DB_PATH`: SQLite path.
 - `AGENT_SCHEDULER_TRACE_PATH`: optional live `trace.jsonl` output.
-- `AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL`: real OpenAI-compatible provider
-  base URL used by the default LLM proxy path.
-- `AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY`: optional upstream provider API key.
+- `AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL`: optional real OpenAI-compatible
+  provider base URL used by the LLM proxy. Defaults to DeepSeek.
+- `AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY`: optional upstream provider API key
+  override. Leave unset when OpenClaw already sends `Authorization`.
 - `AGENT_SCHEDULER_POLICY`: `observe-only` or `concurrency`.
 - `AGENT_SCHEDULER_TOOL_PROFILES`: optional scheduler profile JSON.
 

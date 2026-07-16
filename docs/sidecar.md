@@ -34,12 +34,16 @@ for complete LLM trace capture. Configure OpenClaw's provider base URL to:
 http://127.0.0.1:8765/v1
 ```
 
-Configure the real upstream provider on the sidecar:
+DeepSeek is the built-in upstream default. For a different OpenAI-compatible
+provider, configure the real upstream provider on the sidecar:
 
 ```bash
-export AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL=https://api.deepseek.com/v1
-export AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY="$DEEPSEEK_API_KEY"
+AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL=http://127.0.0.1:8000/v1
 ```
+
+The proxy forwards OpenClaw's `Authorization` header by default, so do not
+duplicate API keys in sidecar config unless OpenClaw does not send auth to the
+proxy. Use `AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY` only as an explicit override.
 
 The proxy forwards `/v1/models` and `/v1/chat/completions` to the upstream
 provider. Non-streaming and streaming chat completions are recorded as
