@@ -61,11 +61,11 @@ not in this working plan.
 Run after code changes:
 
 ```bash
-python tools/validate_contracts.py
-python -m pytest tests -q --basetemp .pytest-tmp-root
+python3 tools/validate_contracts.py
+python3 -m pytest tests -q --basetemp .pytest-tmp-root
 
 cd services/scheduler
-python -m pytest tests -q
+python3 -m pytest tests -q
 
 cd ../../packages/openclaw-plugin
 npm test
@@ -76,10 +76,10 @@ Use `npm.cmd` on Windows PowerShell when `npm.ps1` is blocked.
 
 ## Last Known Validation
 
-- Passed: `python tools\validate_contracts.py`
-- Passed: `python -m pytest tests -q --basetemp .pytest-tmp-root`
+- Passed: `python3 tools\validate_contracts.py`
+- Passed: `python3 -m pytest tests -q --basetemp .pytest-tmp-root`
   - 3 tests passed.
-- Passed: `cd services/scheduler && python -m pytest tests -q`
+- Passed: `cd services/scheduler && python3 -m pytest tests -q`
   - 20 tests passed.
 - Passed: `cd packages/openclaw-plugin && npm.cmd test`
   - 4 Node tests passed.

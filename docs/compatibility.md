@@ -25,7 +25,7 @@ are rerun successfully on the target machine.
 Expected validation commands:
 
 ```bash
-python -m pip install -e 'services/scheduler[dev]'
+python3 -m pip install -e 'services/scheduler[dev]'
 
 cd packages/openclaw-plugin
 npm install
@@ -34,11 +34,11 @@ npm run build
 npm test
 
 cd ../..
-python tools/validate_contracts.py
-python -m pytest tests/test_agent_test_bench_adapter.py tests/test_import_agent_test_bench_trace.py --basetemp .pytest-tmp-root
+python3 tools/validate_contracts.py
+python3 -m pytest tests/test_agent_test_bench_adapter.py tests/test_import_agent_test_bench_trace.py --basetemp .pytest-tmp-root
 
 cd services/scheduler
-python -m pytest
+python3 -m pytest
 
 cd ../..
 openclaw plugins install --link ./packages/openclaw-plugin
@@ -50,8 +50,8 @@ does not expose `build_editable`, upgrade packaging tools or use the
 non-editable install path:
 
 ```bash
-python -m pip install --upgrade pip setuptools wheel
-python -m pip install 'services/scheduler[dev]'
+python3 -m pip install --upgrade pip setuptools wheel
+python3 -m pip install 'services/scheduler[dev]'
 ```
 
 ## OpenClaw SDK

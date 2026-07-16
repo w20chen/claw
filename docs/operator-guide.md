@@ -44,7 +44,9 @@ is `unattributed`.
 
 ```bash
 cd ~/claw
-python -m pip install -e 'services/scheduler[dev]'
+python3 -m pip install -e 'services/scheduler[dev]'
+command -v claw-launch
+claw-launch --help
 
 cd packages/openclaw-plugin
 npm install
@@ -52,10 +54,11 @@ npm run build
 cd ../..
 ```
 
-Confirm `claw-launch` is available:
+If `command -v claw-launch` prints nothing, the scheduler package was not
+installed into the Python environment used by this shell. Rerun:
 
 ```bash
-claw-launch --help
+python3 -m pip install -e 'services/scheduler[dev]'
 ```
 
 ## 2. Link The Plugin Into OpenClaw
@@ -83,7 +86,8 @@ Find the absolute `claw-launch` path first. Do not rely on `launcherPath:
 your interactive shell.
 
 ```bash
-export CLAW_LAUNCHER_PATH="$(python -c 'import shutil; p=shutil.which("claw-launch"); assert p, "claw-launch not found"; print(p)')"
+export CLAW_LAUNCHER_PATH="$(command -v claw-launch)"
+test -n "$CLAW_LAUNCHER_PATH"
 echo "$CLAW_LAUNCHER_PATH"
 ```
 
@@ -135,6 +139,21 @@ If `managed-wrapper` causes trouble while debugging, temporarily switch to
 `executionBackend: "hook-only"`. That still records model/tool trace content,
 but OS resource usage may be `unattributed`.
 
+## When To Rebuild Or Restart
+
+- TypeScript plugin changes: run `cd packages/openclaw-plugin && npm run build`,
+  then `openclaw plugins install --link ./packages/openclaw-plugin`. Restart a
+  long-lived Gateway with `openclaw gateway restart`.
+- Python sidecar changes under `services/scheduler/src`: restart the sidecar
+  process. Editable install means source changes are picked up by the next
+  process.
+- Launcher command missing or stale: rerun
+  `python3 -m pip install -e 'services/scheduler[dev]'`, then re-export
+  `CLAW_LAUNCHER_PATH="$(command -v claw-launch)"`.
+- Config or environment changes: rerun `openclaw config patch --stdin` or
+  re-export the `OPENCLAW_HARDWARE_SCHEDULER_*` variables before starting the
+  next `openclaw agent --local` command. Gateway users should restart Gateway.
+
 ## 4. Start The Sidecar Trace Writer
 
 Terminal 1:
@@ -144,7 +163,7 @@ cd ~/claw/services/scheduler
 export PYTHONPATH=src
 export AGENT_SCHEDULER_DB_PATH=../../data/openclaw-trace.sqlite3
 export AGENT_SCHEDULER_TRACE_PATH=../../data/trace.jsonl
-python -m agent_scheduler.main --host 127.0.0.1 --port 8765
+python3 -m agent_scheduler.main --host 127.0.0.1 --port 8765
 ```
 
 Check health from another shell:
@@ -189,7 +208,7 @@ Run a task that forces a shell tool call:
 ```bash
 cd ~/claw
 openclaw agent --local --agent main --model "$OPENCLAW_TEST_MODEL" \
-  --message 'Use the shell to run: python -c "import pathlib, time; pathlib.Path(\"openclaw_trace_probe.txt\").write_text(\"trace-probe\\n\"); print(2 + 2); time.sleep(1)". Then summarize the result.'
+  --message 'Use the shell to run: python3 -c "import pathlib, time; pathlib.Path(\"openclaw_trace_probe.txt\").write_text(\"trace-probe\\n\"); print(2 + 2); time.sleep(1)". Then summarize the result.'
 ```
 
 This should create a real OpenClaw model turn and a real OpenClaw `exec` tool
@@ -206,7 +225,7 @@ curl http://127.0.0.1:8765/metrics
 For easier reading:
 
 ```bash
-python - <<'PY'
+python3 - <<'PY'
 import json
 from pathlib import Path
 
@@ -278,7 +297,7 @@ If resource usage is `unattributed`:
 
 - Prefer `executionBackend: "managed-wrapper"` for `exec`.
 - Use an absolute launcher path. Confirm:
-  `python -c 'import shutil; print(shutil.which("claw-launch"))'`.
+  `command -v claw-launch`.
 - On Linux, optionally set `CLAW_CGROUP_ROOT` before the OpenClaw run.
 
 If OpenClaw reports:
@@ -298,8 +317,8 @@ If OpenClaw reports:
 
 the launcher path is not absolute or not visible to the exec environment. Set
 `CLAW_LAUNCHER_PATH` and
-`OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH` as shown above, rebuild/relink the
-plugin, and rerun.
+`OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH` from `command -v claw-launch`, then
+rerun.
 
 If no model can run:
 
@@ -313,7 +332,7 @@ sidecar sanity check when model auth is unavailable:
 
 ```bash
 cd ~/claw
-python tools/demo_trace_recorder.py
+python3 tools/demo_trace_recorder.py
 ```
 
 The real validation is the OpenClaw task path above.

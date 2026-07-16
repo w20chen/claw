@@ -19,15 +19,15 @@ Relevant findings:
 Importer:
 
 ```bash
-python tools/import_agent_test_bench_trace.py input-trace.jsonl output-events.jsonl --dry-run
-python tools/import_agent_test_bench_trace.py input-trace.jsonl output-events.jsonl \
+python3 tools/import_agent_test_bench_trace.py input-trace.jsonl output-events.jsonl --dry-run
+python3 tools/import_agent_test_bench_trace.py input-trace.jsonl output-events.jsonl \
   --profiles-out tool-profiles.generated.json
 ```
 
 Benchmark adapter:
 
 ```bash
-python tools/run_agent_test_bench.py -- \
+python3 tools/run_agent_test_bench.py -- \
   --provider deepseek --model deepseek-chat \
   --benchmark swe-rebench --scaffold openclaw \
   --container docker --mcp-config none \
@@ -35,7 +35,7 @@ python tools/run_agent_test_bench.py -- \
 ```
 
 Everything after `--` is passed unchanged to
-`python -m trace_collect.cli` inside the `agent-test-bench` repository. This
+`python3 -m trace_collect.cli` inside the `agent-test-bench` repository. This
 preserves benchmark CLI usage, trace layout, and image handling.
 
 The importer maps canonical tool execution spans into offline

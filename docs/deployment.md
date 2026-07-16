@@ -3,7 +3,7 @@
 Development:
 
 ```bash
-python -m pip install -e 'services/scheduler[dev]'
+python3 -m pip install -e 'services/scheduler[dev]'
 cd packages/openclaw-plugin && npm install && cd ../..
 make dev-sidecar
 make build-plugin
@@ -13,14 +13,14 @@ make test
 If editable install is unavailable in the target Python environment, use:
 
 ```bash
-python -m pip install 'services/scheduler[dev]'
+python3 -m pip install 'services/scheduler[dev]'
 ```
 
 Python wheel:
 
 ```bash
 cd services/scheduler
-python -m build
+python3 -m build
 ```
 
 npm tarball:

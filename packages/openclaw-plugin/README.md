@@ -24,8 +24,16 @@ the plugin also accepts these environment overrides:
 export OPENCLAW_HARDWARE_SCHEDULER_ENDPOINT=http://127.0.0.1:8765
 export OPENCLAW_HARDWARE_SCHEDULER_RECORD_RAW_TRACE=true
 export OPENCLAW_HARDWARE_SCHEDULER_EXECUTION_BACKEND=managed-wrapper
-export OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH="$(python -c 'import shutil; p=shutil.which("claw-launch"); assert p, "claw-launch not found"; print(p)')"
+export OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH="$(command -v claw-launch)"
+test -n "$OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH"
 export OPENCLAW_HARDWARE_SCHEDULER_SECURITY_BOUNDARY_ACCEPTED=true
+```
+
+If `command -v claw-launch` is empty, install the sidecar package first:
+
+```bash
+cd ~/claw
+python3 -m pip install -e 'services/scheduler[dev]'
 ```
 
 For stronger `exec` resource attribution, use `managed-wrapper`:

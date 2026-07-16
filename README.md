@@ -58,7 +58,9 @@ Install dependencies:
 
 ```bash
 npm install -g openclaw@2026.7.1
-python -m pip install -e 'services/scheduler[dev]'
+python3 -m pip install -e 'services/scheduler[dev]'
+command -v claw-launch
+claw-launch --help
 
 cd packages/openclaw-plugin
 npm install
@@ -73,7 +75,7 @@ cd services/scheduler
 export PYTHONPATH=src
 export AGENT_SCHEDULER_DB_PATH=../../data/scheduler.sqlite3
 export AGENT_SCHEDULER_TRACE_PATH=../../data/trace.jsonl
-python -m agent_scheduler.main --host 127.0.0.1 --port 8765
+python3 -m agent_scheduler.main --host 127.0.0.1 --port 8765
 ```
 
 Link the plugin:
@@ -87,7 +89,8 @@ openclaw plugins inspect hardware-scheduler --runtime --json
 Configure the plugin for real raw trace recording:
 
 ```bash
-export CLAW_LAUNCHER_PATH="$(python -c 'import shutil; p=shutil.which("claw-launch"); assert p, "claw-launch not found"; print(p)')"
+export CLAW_LAUNCHER_PATH="$(command -v claw-launch)"
+test -n "$CLAW_LAUNCHER_PATH"
 
 cat <<JSON5 | openclaw config patch --stdin
 {
@@ -123,7 +126,7 @@ export OPENCLAW_HARDWARE_SCHEDULER_SECURITY_BOUNDARY_ACCEPTED=true
 openclaw models list
 export OPENCLAW_TEST_MODEL='<provider/model-from-openclaw-models-list>'
 openclaw agent --local --agent main --model "$OPENCLAW_TEST_MODEL" \
-  --message 'Use the shell to run: python -c "print(2 + 2)". Then summarize the result.'
+  --message 'Use the shell to run: python3 -c "print(2 + 2)". Then summarize the result.'
 
 curl http://127.0.0.1:8765/v1/tools/recent
 curl http://127.0.0.1:8765/metrics
@@ -166,11 +169,11 @@ Plugin:
 ## Validation
 
 ```bash
-python tools/validate_contracts.py
-python -m pytest tests -q --basetemp .pytest-tmp-root
+python3 tools/validate_contracts.py
+python3 -m pytest tests -q --basetemp .pytest-tmp-root
 
 cd services/scheduler
-python -m pytest tests -q
+python3 -m pytest tests -q
 
 cd ../../packages/openclaw-plugin
 npm test

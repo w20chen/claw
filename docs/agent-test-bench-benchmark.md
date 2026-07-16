@@ -11,7 +11,7 @@ then validate/import the produced traces:
 
 ```bash
 export AGENT_TEST_BENCH_ROOT=~/agent-test-bench
-python tools/run_agent_test_bench.py -- \
+python3 tools/run_agent_test_bench.py -- \
   --provider deepseek --model deepseek-chat \
   --benchmark swe-rebench --scaffold openclaw \
   --container docker --mcp-config none \
@@ -21,7 +21,7 @@ python tools/run_agent_test_bench.py -- \
 Everything after `--` is passed verbatim to:
 
 ```bash
-PYTHONPATH=src python -m trace_collect.cli ...
+PYTHONPATH=src python3 -m trace_collect.cli ...
 ```
 
 The wrapper sets `PYTHONPATH` to `<agent-test-bench>/src`, runs from the
@@ -32,7 +32,7 @@ layout, and resume behavior.
 Preview the delegated command without running a benchmark:
 
 ```bash
-python tools/run_agent_test_bench.py --dry-run -- \
+python3 tools/run_agent_test_bench.py --dry-run -- \
   --provider deepseek --model deepseek-chat \
   --benchmark swe-rebench --scaffold openclaw \
   --container docker --mcp-config none \
@@ -44,13 +44,13 @@ python tools/run_agent_test_bench.py --dry-run -- \
 Validate an existing run directory or one `trace.jsonl` file:
 
 ```bash
-python tools/validate_agent_test_bench_run.py ~/agent-test-bench/traces/.../run
+python3 tools/validate_agent_test_bench_run.py ~/agent-test-bench/traces/.../run
 ```
 
 Generate scheduler-compatible offline artifacts while validating:
 
 ```bash
-python tools/validate_agent_test_bench_run.py <run-dir> \
+python3 tools/validate_agent_test_bench_run.py <run-dir> \
   --events-out artifacts/agent-test-bench-events.jsonl \
   --profiles-out artifacts/agent-test-bench-tool-profiles.json
 ```

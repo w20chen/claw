@@ -41,7 +41,7 @@ The sidecar never substitutes its own process metrics for tool metrics.
 Contracts:
 
 ```bash
-python tools/validate_contracts.py
+python3 tools/validate_contracts.py
 ```
 
 Sidecar and demo:
@@ -49,13 +49,13 @@ Sidecar and demo:
 ```bash
 cd services/scheduler
 PYTHONPATH=src AGENT_SCHEDULER_TRACE_PATH=../../data/trace.jsonl \
-  python -m agent_scheduler.main --host 127.0.0.1 --port 8765
+  python3 -m agent_scheduler.main --host 127.0.0.1 --port 8765
 ```
 
 In another shell:
 
 ```bash
-python tools/demo_supported_features.py --run-launcher
+python3 tools/demo_supported_features.py --run-launcher
 curl http://127.0.0.1:8765/v1/tools/recent
 curl http://127.0.0.1:8765/metrics
 tail -n 20 data/trace.jsonl
@@ -73,13 +73,13 @@ Scheduler tests:
 
 ```bash
 cd services/scheduler
-python -m pytest tests -q
+python3 -m pytest tests -q
 ```
 
 Root tests:
 
 ```bash
-python -m pytest tests -q --basetemp .pytest-tmp-root
+python3 -m pytest tests -q --basetemp .pytest-tmp-root
 ```
 
 ## Expected Trace Shape
