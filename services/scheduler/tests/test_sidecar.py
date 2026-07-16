@@ -122,9 +122,13 @@ def test_metrics_endpoint(tmp_path: Path) -> None:
     assert "scheduler_tool_runtime_unattributed_samples_total" in response.text
     assert "scheduler_tool_cpu_seconds_total" in response.text
     assert "scheduler_tool_memory_rss_bytes" in response.text
+    assert "scheduler_tool_memory_rss_peak_bytes" in response.text
     assert "scheduler_tool_process_count" in response.text
+    assert "scheduler_tool_cpu_utilization_avg_cores" in response.text
     assert "scheduler_tool_net_rx_bytes_total" in response.text
     assert "scheduler_tool_net_tx_bytes_total" in response.text
+    assert "scheduler_tool_io_write_bytes_per_second" in response.text
+    assert "scheduler_tool_net_tx_bytes_per_second" in response.text
 
 
 def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Path) -> None:
@@ -237,9 +241,16 @@ def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Pa
     resource_usage = tool_record["data"]["resource_usage"]
     assert resource_usage["attribution_status"] == "unattributed"
     assert "cpu_time_delta_s" in resource_usage
+    assert "cpu_utilization_avg_cores" in resource_usage
+    assert "sampling_quality" in resource_usage
+    assert "sampling_point_count" in resource_usage
     assert "memory_footprint_bytes" in resource_usage
+    assert "memory_rss_bytes_peak" in resource_usage
     assert "net_rx_bytes_delta" in resource_usage
+    assert "net_rx_bytes_per_s" in resource_usage
     assert "disk_read_bytes_delta" in resource_usage
+    assert "disk_read_bytes_per_s" in resource_usage
+    assert "timeline" in resource_usage
 
     model_records = [record for record in records if record.get("action_type") == "llm_call"]
     assert len(model_records) == 1

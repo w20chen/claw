@@ -50,7 +50,10 @@ def build_state(config: SchedulerConfig | None = None) -> AppState:
         leases=leases,
         policy=policy,
         calibrator=EWMACalibrator(store, cfg),
-        tool_monitor=RealtimeToolMonitor(),
+        tool_monitor=RealtimeToolMonitor(
+            poll_interval_s=max(0.01, cfg.resource_poll_interval_ms / 1000),
+            max_timeline_points=max(1, cfg.resource_timeline_max_points),
+        ),
         executions=ExecutionRegistry(),
         metrics=Metrics(),
         topology=read_topology(),

@@ -27,6 +27,14 @@ When the plugin calls `POST /v1/decisions/tool` and the sidecar allows the tool,
 the sidecar opens an in-memory monitoring window keyed by `tool_call_id`.
 When `POST /v1/events/tool-completed` arrives, the sidecar closes that window,
 stores a `tool_runtime_samples` row, and updates Prometheus counters/gauges.
+By default, scoped tools are polled every 50 ms. Tune this with
+`AGENT_SCHEDULER_RESOURCE_POLL_INTERVAL_MS`. Lower values can catch shorter
+tools, at the cost of more sidecar overhead.
+
+The sidecar writes one aggregate runtime sample when the tool completes. It
+also stores a compact per-tool `resource_timeline` inside that final sample,
+up to `AGENT_SCHEDULER_RESOURCE_TIMELINE_MAX_POINTS` points. It does not append
+one JSONL record per polling tick.
 
 Stored sample fields include:
 
@@ -39,6 +47,10 @@ Stored sample fields include:
 - PID process-tree CPU time delta, RSS before/after, IO byte deltas, and
   context-switch deltas when `resource_scope.pid` is present and `psutil` can
   read it
+- average CPU utilization in cores and percent over the tool duration
+- observed peak RSS, tracked across poll samples
+- average disk and network throughput in bytes/second
+- sampling metadata: interval, point count, quality, and timeline truncation
 - cgroup-v2 CPU time, memory, I/O, process count, and context-switch deltas
   when a trusted scope includes `kind: "cgroup-v2"` and `cgroup_path`
 - best-effort network rx/tx deltas from `/proc/<pid>/net/dev`
@@ -59,11 +71,17 @@ Useful metrics:
 - `scheduler_active_tool_monitors`
 - `scheduler_tool_cpu_seconds_total`
 - `scheduler_tool_memory_rss_bytes`
+- `scheduler_tool_memory_rss_peak_bytes`
+- `scheduler_tool_cpu_utilization_avg_cores`
 - `scheduler_tool_process_count`
 - `scheduler_tool_io_read_bytes_total`
 - `scheduler_tool_io_write_bytes_total`
+- `scheduler_tool_io_read_bytes_per_second`
+- `scheduler_tool_io_write_bytes_per_second`
 - `scheduler_tool_net_rx_bytes_total`
 - `scheduler_tool_net_tx_bytes_total`
+- `scheduler_tool_net_rx_bytes_per_second`
+- `scheduler_tool_net_tx_bytes_per_second`
 - `scheduler_tool_context_switches_total`
 
 Set `AGENT_SCHEDULER_TRACE_PATH` to append live agent-test-bench v5-shaped

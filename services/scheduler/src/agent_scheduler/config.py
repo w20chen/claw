@@ -18,6 +18,8 @@ class SchedulerConfig:
     tool_profiles_path: Path | None = None
     auth_token: str | None = None
     trace_path: Path | None = None
+    resource_poll_interval_ms: int = 50
+    resource_timeline_max_points: int = 2_000
 
     @classmethod
     def from_env(cls) -> "SchedulerConfig":
@@ -35,4 +37,6 @@ class SchedulerConfig:
             tool_profiles_path=Path(profile) if profile else None,
             auth_token=os.getenv("AGENT_SCHEDULER_TOKEN"),
             trace_path=Path(trace) if trace else None,
+            resource_poll_interval_ms=int(os.getenv("AGENT_SCHEDULER_RESOURCE_POLL_INTERVAL_MS", "50")),
+            resource_timeline_max_points=int(os.getenv("AGENT_SCHEDULER_RESOURCE_TIMELINE_MAX_POINTS", "2000")),
         )

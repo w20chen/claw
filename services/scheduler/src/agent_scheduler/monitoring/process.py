@@ -48,6 +48,10 @@ class ProcessResourceSampler:
         if self._psutil is None:
             return self._empty(now, mono, scope.pid, "psutil-unavailable")
         try:
+            if scope.root_starttime_ticks is not None:
+                observed_starttime = self._read_pid_starttime_ticks(scope.root_pid or scope.pid)
+                if observed_starttime is not None and observed_starttime != int(scope.root_starttime_ticks):
+                    return self._empty(now, mono, scope.pid, "pid-reused")
             process = self._psutil.Process(scope.pid)
             if scope.process_start_time is not None:
                 create_time = float(process.create_time())
@@ -204,6 +208,25 @@ class ProcessResourceSampler:
             except ValueError:
                 pass
         return (rx_total, tx_total) if found else None
+
+    @staticmethod
+    def _read_pid_starttime_ticks(pid: int | None) -> int | None:
+        if pid is None or pid <= 0:
+            return None
+        try:
+            text = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+        except OSError:
+            return None
+        close = text.rfind(")")
+        if close < 0:
+            return None
+        fields = text[close + 1 :].split()
+        if len(fields) <= 19:
+            return None
+        try:
+            return int(fields[19])
+        except ValueError:
+            return None
 
     def _snapshot_processes(
         self,

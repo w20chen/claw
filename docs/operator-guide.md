@@ -20,7 +20,7 @@ For a real OpenClaw run, the sidecar writes `trace.jsonl` records like:
 ```json
 {"type":"trace_metadata","trace_format_version":5,"scaffold":"openclaw","mode":"collect"}
 {"type":"action","action_type":"llm_call","data":{"messages_in":[...],"content":"...","llm_latency_ms":1234.0}}
-{"type":"action","action_type":"tool_exec","data":{"tool_name":"exec","tool_args":{"command":"..."},"tool_result":"...","resource_usage":{"cpu_time_delta_s":0.1,"memory_footprint_bytes":12345678,"disk_read_bytes_delta":0,"disk_write_bytes_delta":4096,"net_rx_bytes_delta":0,"net_tx_bytes_delta":0}}}
+{"type":"action","action_type":"tool_exec","data":{"tool_name":"exec","tool_args":{"command":"..."},"tool_result":"...","resource_usage":{"cpu_time_delta_s":0.1,"cpu_utilization_avg_cores":0.2,"memory_rss_bytes_peak":12345678,"disk_write_bytes_per_s":4096.0,"net_tx_bytes_per_s":0.0,"sampling_quality":"ok","timeline":[...]}}}
 ```
 
 `recordRawTrace: true` is the important plugin switch. It tells the plugin to
@@ -163,6 +163,8 @@ cd ~/claw/services/scheduler
 export PYTHONPATH=src
 export AGENT_SCHEDULER_DB_PATH=../../data/openclaw-trace.sqlite3
 export AGENT_SCHEDULER_TRACE_PATH=../../data/trace.jsonl
+export AGENT_SCHEDULER_RESOURCE_POLL_INTERVAL_MS=50
+export AGENT_SCHEDULER_RESOURCE_TIMELINE_MAX_POINTS=2000
 python3 -m agent_scheduler.main --host 127.0.0.1 --port 8765
 ```
 
@@ -223,28 +225,12 @@ curl 'http://127.0.0.1:8765/v1/tools/recent?limit=5'
 curl http://127.0.0.1:8765/metrics
 ```
 
-For easier reading:
+For CLI visualization:
 
 ```bash
-python3 - <<'PY'
-import json
-from pathlib import Path
-
-for line in Path("data/trace.jsonl").read_text(encoding="utf-8").splitlines():
-    rec = json.loads(line)
-    if rec.get("type") != "action":
-        continue
-    print("\n==", rec.get("action_type"), rec.get("action_id"), "==")
-    data = rec.get("data", {})
-    if rec.get("action_type") == "llm_call":
-        print("messages_in:", json.dumps(data.get("messages_in"), ensure_ascii=False)[:1000])
-        print("content:", json.dumps(data.get("content"), ensure_ascii=False)[:1000])
-    if rec.get("action_type") == "tool_exec":
-        print("tool_name:", data.get("tool_name"))
-        print("tool_args:", json.dumps(data.get("tool_args"), ensure_ascii=False)[:1000])
-        print("tool_result:", json.dumps(data.get("tool_result"), ensure_ascii=False)[:1000])
-        print("resource_usage:", json.dumps(data.get("resource_usage"), indent=2, ensure_ascii=False))
-PY
+python3 tools/inspect_trace.py data/trace.jsonl --tail 20
+python3 tools/inspect_trace.py data/trace.jsonl --tail 20 --details
+python3 tools/inspect_trace.py data/trace.jsonl --type tool_exec --tail 10 --details --timeline
 ```
 
 You are looking for:
@@ -254,7 +240,10 @@ You are looking for:
 - `tool_exec.data.tool_args`
 - `tool_exec.data.tool_result`
 - `tool_exec.data.resource_usage.attribution_status`
-- CPU/RSS/disk/network fields inside `resource_usage`
+- `cpu_utilization_avg_cores`, `memory_rss_bytes_peak`, disk/network
+  `*_bytes_per_s`, and `sampling_quality` inside `resource_usage`
+- `resource_usage.timeline`, a compact list of sampled points attached to the
+  final tool action
 
 ## 8. Optional cgroup Scope
 

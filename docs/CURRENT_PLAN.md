@@ -34,12 +34,14 @@ not in this working plan.
   - `managed-wrapper`
 - Python reference `claw-launch`.
 - Runtime samples for scoped tools:
-  - CPU time
-  - RSS memory
-  - disk read/write bytes
-  - best-effort network rx/tx bytes
+  - CPU time and average CPU utilization
+  - observed peak RSS memory
+  - disk read/write bytes and average throughput
+  - best-effort network rx/tx bytes and average throughput
   - context switches
+  - compact per-tool resource timeline
 - Optional `AGENT_SCHEDULER_TRACE_PATH` live trace writer.
+- CLI trace visualization with `tools/inspect_trace.py`.
 - Optional plugin `recordRawTrace=true` capture of hook-visible model
   input/output, tool args/results, and raw hook payloads.
 - Offline `agent-test-bench` trace importer and benchmark adapter.
@@ -81,7 +83,9 @@ Use `npm.cmd` on Windows PowerShell when `npm.ps1` is blocked.
   - 3 tests passed.
 - Passed: `cd services/scheduler && python3 -m pytest tests -q`
   - 20 tests passed.
-- Passed: `python3 -m py_compile tools\demo_trace_recorder.py tools\demo_supported_features.py services\scheduler\src\agent_scheduler\trace.py services\scheduler\src\agent_scheduler\monitoring\tool_runtime.py`
+- Passed: `python3 -m py_compile tools\inspect_trace.py services\scheduler\src\agent_scheduler\monitoring\process.py services\scheduler\src\agent_scheduler\monitoring\tool_runtime.py services\scheduler\src\agent_scheduler\trace.py services\scheduler\src\agent_scheduler\telemetry\metrics.py services\scheduler\src\agent_scheduler\config.py services\scheduler\src\agent_scheduler\api\dependencies.py`
+- Passed: `python3 tools\inspect_trace.py tests\fixtures\agent_test_bench_trace.jsonl --all --details --width 100`
+- Passed: `python3 tools\inspect_trace.py tests\fixtures\agent_test_bench_trace.jsonl --all --details --timeline --width 100`
 - Passed: `cd packages/openclaw-plugin && npm.cmd test`
   - 4 Node tests passed.
 - Passed: `cd packages/openclaw-plugin && npm.cmd run typecheck`

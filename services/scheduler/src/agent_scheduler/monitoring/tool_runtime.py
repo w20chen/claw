@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
+from typing import Any
 
 from agent_scheduler.contracts.models import ResourceScope, ToolBeforeRequest, ToolCompletedEvent
 from agent_scheduler.monitoring.process import ProcessResourceSampler, ResourceSnapshot
@@ -27,6 +28,18 @@ class ToolRuntimeSample:
     net_rx_bytes_delta: int | None
     net_tx_bytes_delta: int | None
     ctx_switches_delta: int | None
+    rss_bytes_peak: int | None
+    cpu_utilization_avg_cores: float | None
+    cpu_utilization_avg_pct: float | None
+    disk_read_bytes_per_s: float | None
+    disk_write_bytes_per_s: float | None
+    net_rx_bytes_per_s: float | None
+    net_tx_bytes_per_s: float | None
+    sampling_interval_ms: int
+    sampling_point_count: int
+    sampling_quality: str
+    resource_timeline: list[dict[str, Any]]
+    resource_timeline_truncated: bool
     resource_class: str
     target_pid: int | None
     process_count_before: int | None
@@ -40,6 +53,10 @@ class _ActiveTool:
     request: ToolBeforeRequest
     snapshot: ResourceSnapshot
     latest_snapshot: ResourceSnapshot
+    rss_bytes_peak: int | None
+    timeline: list[dict[str, Any]]
+    snapshot_count: int
+    timeline_truncated: bool
     resource_class: str
     operation: str | None
 
@@ -49,11 +66,13 @@ class RealtimeToolMonitor:
         self,
         sampler: ProcessResourceSampler | None = None,
         max_active: int = 10_000,
-        poll_interval_s: float = 0.1,
+        poll_interval_s: float = 0.05,
+        max_timeline_points: int = 2_000,
     ) -> None:
         self.sampler = sampler or ProcessResourceSampler()
         self.max_active = max_active
         self.poll_interval_s = poll_interval_s
+        self.max_timeline_points = max_timeline_points
         self._active: dict[str, _ActiveTool] = {}
         self._lock = threading.RLock()
         self._poller = threading.Thread(target=self._poll_active, daemon=True)
@@ -70,6 +89,10 @@ class RealtimeToolMonitor:
                 request=request,
                 snapshot=snapshot,
                 latest_snapshot=snapshot,
+                rss_bytes_peak=snapshot.rss_bytes,
+                timeline=[_timeline_point(snapshot)],
+                snapshot_count=1,
+                timeline_truncated=False,
                 resource_class=resource_class,
                 operation=extract_operation(request),
             )
@@ -86,21 +109,48 @@ class RealtimeToolMonitor:
         if completion_scope is None and active is not None:
             completion_scope = active.request.resource_scope
         end = self.sampler.snapshot(completion_scope)
+        final_snapshot_available = end.available
+        used_latest_snapshot = False
         if active is not None and not end.available and active.latest_snapshot.available:
             end = active.latest_snapshot
+            used_latest_snapshot = True
         if active is None:
             start = end
             operation = None
             resource_class = "unknown"
+            rss_bytes_peak = end.rss_bytes
+            timeline = [_timeline_point(end)]
+            snapshot_count = 1
+            timeline_truncated = False
         else:
             start = active.snapshot
             operation = active.operation
             resource_class = active.resource_class
+            rss_bytes_peak = active.rss_bytes_peak
+            timeline = list(active.timeline)
+            snapshot_count = active.snapshot_count
+            timeline_truncated = active.timeline_truncated
+            if final_snapshot_available and end.captured_at != active.latest_snapshot.captured_at:
+                timeline, timeline_truncated = _append_timeline(
+                    timeline,
+                    _timeline_point(end),
+                    self.max_timeline_points,
+                    timeline_truncated,
+                )
+                snapshot_count += 1
+                rss_bytes_peak = _max_optional(rss_bytes_peak, end.rss_bytes)
         wall_started_at, wall_ended_at = _wall_times_from_duration(
             start.captured_at,
             end.captured_at,
             completion.duration_ms,
         )
+        duration_s = completion.duration_ms / 1000 if completion.duration_ms > 0 else None
+        cpu_delta = _delta_float(start.process_cpu_time_s, end.process_cpu_time_s)
+        read_delta = _delta_int(start.read_bytes, end.read_bytes)
+        write_delta = _delta_int(start.write_bytes, end.write_bytes)
+        net_rx_delta = _delta_int(start.net_rx_bytes, end.net_rx_bytes)
+        net_tx_delta = _delta_int(start.net_tx_bytes, end.net_tx_bytes)
+        cpu_avg_cores = _rate(cpu_delta, duration_s)
         return ToolRuntimeSample(
             event_id=completion.event_id,
             tool_call_id=completion.tool_call_id,
@@ -110,14 +160,33 @@ class RealtimeToolMonitor:
             ended_at=wall_ended_at,
             duration_ms=completion.duration_ms,
             monitor_duration_ms=max(0, int((end.monotonic_s - start.monotonic_s) * 1000)),
-            cpu_time_delta_s=_delta_float(start.process_cpu_time_s, end.process_cpu_time_s),
+            cpu_time_delta_s=cpu_delta,
             rss_bytes_before=start.rss_bytes,
             rss_bytes_after=end.rss_bytes,
-            read_bytes_delta=_delta_int(start.read_bytes, end.read_bytes),
-            write_bytes_delta=_delta_int(start.write_bytes, end.write_bytes),
-            net_rx_bytes_delta=_delta_int(start.net_rx_bytes, end.net_rx_bytes),
-            net_tx_bytes_delta=_delta_int(start.net_tx_bytes, end.net_tx_bytes),
+            read_bytes_delta=read_delta,
+            write_bytes_delta=write_delta,
+            net_rx_bytes_delta=net_rx_delta,
+            net_tx_bytes_delta=net_tx_delta,
             ctx_switches_delta=_delta_int(start.ctx_switches, end.ctx_switches),
+            rss_bytes_peak=rss_bytes_peak,
+            cpu_utilization_avg_cores=cpu_avg_cores,
+            cpu_utilization_avg_pct=None if cpu_avg_cores is None else cpu_avg_cores * 100,
+            disk_read_bytes_per_s=_rate(read_delta, duration_s),
+            disk_write_bytes_per_s=_rate(write_delta, duration_s),
+            net_rx_bytes_per_s=_rate(net_rx_delta, duration_s),
+            net_tx_bytes_per_s=_rate(net_tx_delta, duration_s),
+            sampling_interval_ms=int(self.poll_interval_s * 1000),
+            sampling_point_count=snapshot_count,
+            sampling_quality=_sampling_quality(
+                start,
+                end,
+                snapshot_count=snapshot_count,
+                used_latest_snapshot=used_latest_snapshot,
+                duration_ms=completion.duration_ms,
+                poll_interval_s=self.poll_interval_s,
+            ),
+            resource_timeline=timeline,
+            resource_timeline_truncated=timeline_truncated,
             resource_class=resource_class,
             target_pid=end.target_pid if end.target_pid is not None else start.target_pid,
             process_count_before=start.process_count,
@@ -143,6 +212,10 @@ class RealtimeToolMonitor:
                 request=request,
                 snapshot=snapshot,
                 latest_snapshot=snapshot,
+                rss_bytes_peak=snapshot.rss_bytes,
+                timeline=[_timeline_point(snapshot)],
+                snapshot_count=1,
+                timeline_truncated=False,
                 resource_class=active.resource_class,
                 operation=active.operation,
             )
@@ -177,12 +250,22 @@ class RealtimeToolMonitor:
                     current = self._active.get(key)
                     if current is not active:
                         continue
+                    timeline, timeline_truncated = _append_timeline(
+                        current.timeline,
+                        _timeline_point(snapshot),
+                        self.max_timeline_points,
+                        current.timeline_truncated,
+                    )
                     self._active[key] = _ActiveTool(
-                        request=active.request,
-                        snapshot=active.snapshot,
+                        request=current.request,
+                        snapshot=current.snapshot,
                         latest_snapshot=snapshot,
-                        resource_class=active.resource_class,
-                        operation=active.operation,
+                        rss_bytes_peak=_max_optional(current.rss_bytes_peak, snapshot.rss_bytes),
+                        timeline=timeline,
+                        snapshot_count=current.snapshot_count + 1,
+                        timeline_truncated=timeline_truncated,
+                        resource_class=current.resource_class,
+                        operation=current.operation,
                     )
 
     @staticmethod
@@ -200,6 +283,12 @@ def _delta_float(start: float | None, end: float | None) -> float | None:
     if start is None or end is None:
         return None
     return max(0.0, end - start)
+
+
+def _rate(delta: float | int | None, duration_s: float | None) -> float | None:
+    if delta is None or duration_s is None or duration_s <= 0:
+        return None
+    return max(0.0, float(delta) / duration_s)
 
 
 def _attribution_status(start: ResourceSnapshot, end: ResourceSnapshot) -> str:
@@ -221,3 +310,55 @@ def _wall_times_from_duration(started_at: float, ended_at: float, duration_ms: i
     if ended_at - started_at < duration_s:
         started_at = ended_at - duration_s
     return started_at, ended_at
+
+
+def _max_optional(left: int | None, right: int | None) -> int | None:
+    values = [value for value in (left, right) if value is not None]
+    return max(values) if values else None
+
+
+def _timeline_point(snapshot: ResourceSnapshot) -> dict[str, Any]:
+    return {
+        "ts": snapshot.captured_at,
+        "cpu_time_s": snapshot.process_cpu_time_s,
+        "rss_bytes": snapshot.rss_bytes,
+        "read_bytes": snapshot.read_bytes,
+        "write_bytes": snapshot.write_bytes,
+        "net_rx_bytes": snapshot.net_rx_bytes,
+        "net_tx_bytes": snapshot.net_tx_bytes,
+        "ctx_switches": snapshot.ctx_switches,
+        "process_count": snapshot.process_count,
+        "available": snapshot.available,
+        "source": snapshot.source,
+    }
+
+
+def _append_timeline(
+    timeline: list[dict[str, Any]],
+    point: dict[str, Any],
+    max_points: int,
+    truncated: bool,
+) -> tuple[list[dict[str, Any]], bool]:
+    if len(timeline) >= max_points:
+        return timeline, True
+    return [*timeline, point], truncated
+
+
+def _sampling_quality(
+    start: ResourceSnapshot,
+    end: ResourceSnapshot,
+    *,
+    snapshot_count: int,
+    used_latest_snapshot: bool,
+    duration_ms: int,
+    poll_interval_s: float,
+) -> str:
+    if start.target_pid is None and end.target_pid is None:
+        return "unattributed"
+    if not start.available and not end.available:
+        return "unavailable"
+    if used_latest_snapshot:
+        return "partial"
+    if snapshot_count < 2 or duration_ms < int(poll_interval_s * 1000):
+        return "low"
+    return "ok"

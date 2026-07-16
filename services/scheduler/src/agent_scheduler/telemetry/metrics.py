@@ -18,7 +18,13 @@ class Metrics:
         self.tool_net_tx_bytes_total = 0
         self.tool_context_switches_total = 0
         self.latest_tool_memory_rss_bytes = 0
+        self.latest_tool_memory_rss_peak_bytes = 0
         self.latest_tool_process_count = 0
+        self.latest_tool_cpu_utilization_avg_cores = 0.0
+        self.latest_tool_io_read_bytes_per_second = 0.0
+        self.latest_tool_io_write_bytes_per_second = 0.0
+        self.latest_tool_net_rx_bytes_per_second = 0.0
+        self.latest_tool_net_tx_bytes_per_second = 0.0
 
     def inc(self, name: str) -> None:
         self.counters[name] += 1
@@ -41,8 +47,20 @@ class Metrics:
             self.tool_context_switches_total += sample.ctx_switches_delta
         if sample.rss_bytes_after is not None:
             self.latest_tool_memory_rss_bytes = sample.rss_bytes_after
+        if sample.rss_bytes_peak is not None:
+            self.latest_tool_memory_rss_peak_bytes = sample.rss_bytes_peak
         if sample.process_count_after is not None:
             self.latest_tool_process_count = sample.process_count_after
+        if sample.cpu_utilization_avg_cores is not None:
+            self.latest_tool_cpu_utilization_avg_cores = sample.cpu_utilization_avg_cores
+        if sample.disk_read_bytes_per_s is not None:
+            self.latest_tool_io_read_bytes_per_second = sample.disk_read_bytes_per_s
+        if sample.disk_write_bytes_per_s is not None:
+            self.latest_tool_io_write_bytes_per_second = sample.disk_write_bytes_per_s
+        if sample.net_rx_bytes_per_s is not None:
+            self.latest_tool_net_rx_bytes_per_second = sample.net_rx_bytes_per_s
+        if sample.net_tx_bytes_per_s is not None:
+            self.latest_tool_net_tx_bytes_per_second = sample.net_tx_bytes_per_s
 
     def render(self, active_leases: int, active_tool_monitors: int = 0) -> str:
         lines = []
@@ -68,16 +86,28 @@ class Metrics:
         lines.append(f"scheduler_tool_cpu_seconds_total {self.tool_cpu_seconds_total:.6f}")
         lines.append("# TYPE scheduler_tool_memory_rss_bytes gauge")
         lines.append(f"scheduler_tool_memory_rss_bytes {self.latest_tool_memory_rss_bytes}")
+        lines.append("# TYPE scheduler_tool_memory_rss_peak_bytes gauge")
+        lines.append(f"scheduler_tool_memory_rss_peak_bytes {self.latest_tool_memory_rss_peak_bytes}")
         lines.append("# TYPE scheduler_tool_process_count gauge")
         lines.append(f"scheduler_tool_process_count {self.latest_tool_process_count}")
+        lines.append("# TYPE scheduler_tool_cpu_utilization_avg_cores gauge")
+        lines.append(f"scheduler_tool_cpu_utilization_avg_cores {self.latest_tool_cpu_utilization_avg_cores:.6f}")
         lines.append("# TYPE scheduler_tool_io_read_bytes_total counter")
         lines.append(f"scheduler_tool_io_read_bytes_total {self.tool_io_read_bytes_total}")
         lines.append("# TYPE scheduler_tool_io_write_bytes_total counter")
         lines.append(f"scheduler_tool_io_write_bytes_total {self.tool_io_write_bytes_total}")
+        lines.append("# TYPE scheduler_tool_io_read_bytes_per_second gauge")
+        lines.append(f"scheduler_tool_io_read_bytes_per_second {self.latest_tool_io_read_bytes_per_second:.6f}")
+        lines.append("# TYPE scheduler_tool_io_write_bytes_per_second gauge")
+        lines.append(f"scheduler_tool_io_write_bytes_per_second {self.latest_tool_io_write_bytes_per_second:.6f}")
         lines.append("# TYPE scheduler_tool_net_rx_bytes_total counter")
         lines.append(f"scheduler_tool_net_rx_bytes_total {self.tool_net_rx_bytes_total}")
         lines.append("# TYPE scheduler_tool_net_tx_bytes_total counter")
         lines.append(f"scheduler_tool_net_tx_bytes_total {self.tool_net_tx_bytes_total}")
+        lines.append("# TYPE scheduler_tool_net_rx_bytes_per_second gauge")
+        lines.append(f"scheduler_tool_net_rx_bytes_per_second {self.latest_tool_net_rx_bytes_per_second:.6f}")
+        lines.append("# TYPE scheduler_tool_net_tx_bytes_per_second gauge")
+        lines.append(f"scheduler_tool_net_tx_bytes_per_second {self.latest_tool_net_tx_bytes_per_second:.6f}")
         lines.append("# TYPE scheduler_tool_context_switches_total counter")
         lines.append(f"scheduler_tool_context_switches_total {self.tool_context_switches_total}")
         lines.append("# TYPE scheduler_decision_latency_seconds summary")

@@ -131,6 +131,8 @@ openclaw agent --local --agent main --model "$OPENCLAW_TEST_MODEL" \
 curl http://127.0.0.1:8765/v1/tools/recent
 curl http://127.0.0.1:8765/metrics
 tail -n 20 data/trace.jsonl
+python3 tools/inspect_trace.py data/trace.jsonl --tail 20 --details
+python3 tools/inspect_trace.py data/trace.jsonl --type tool_exec --tail 10 --details --timeline
 ```
 
 PowerShell note: use `npm.cmd` and `openclaw.cmd` if `.ps1` shims are blocked.

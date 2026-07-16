@@ -12,8 +12,9 @@ full run sequence, use [operator-guide.md](operator-guide.md).
 | Tool decisions | Supported | Observe-only and bounded concurrency policies. |
 | Tool completions | Supported | Idempotent SQLite persistence. |
 | Model events | Supported | Stored and optionally written to trace. |
-| Runtime samples | Supported | CPU, RSS, disk I/O, network I/O, context switches when scoped. |
+| Runtime samples | Supported | CPU avg, RSS peak, disk/network throughput, context switches when scoped. |
 | Live `trace.jsonl` | Supported | Enable with `AGENT_SCHEDULER_TRACE_PATH`. |
+| CLI trace visualization | Supported | Use `tools/inspect_trace.py` for timeline/detail views. |
 | agent-test-bench format | Supported | v5-shaped records; raw content requires `recordRawTrace=true`. |
 | Plugin hooks | Supported | `before_tool_call`, `after_tool_call`, model start/end. |
 | `exec` hook-only | Supported | No param rewrite. |
@@ -59,6 +60,8 @@ python3 tools/demo_supported_features.py --run-launcher
 curl http://127.0.0.1:8765/v1/tools/recent
 curl http://127.0.0.1:8765/metrics
 tail -n 20 data/trace.jsonl
+python3 tools/inspect_trace.py data/trace.jsonl --tail 20 --details
+python3 tools/inspect_trace.py data/trace.jsonl --type tool_exec --tail 10 --details --timeline
 ```
 
 Plugin:

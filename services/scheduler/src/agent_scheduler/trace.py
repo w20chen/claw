@@ -137,24 +137,31 @@ def _tool_key(tool_call_id: str | None, event_id: str) -> str:
 
 
 def _resource_usage(sample: ToolRuntimeSample) -> dict[str, Any]:
-    memory_values = [
-        value
-        for value in (sample.rss_bytes_before, sample.rss_bytes_after)
-        if value is not None
-    ]
     return {
         "attribution_status": sample.attribution_status,
         "monitor_source": sample.monitor_source,
+        "sampling_interval_ms": sample.sampling_interval_ms,
+        "sampling_point_count": sample.sampling_point_count,
+        "sampling_quality": sample.sampling_quality,
         "cpu_time_delta_s": sample.cpu_time_delta_s,
+        "cpu_utilization_avg_cores": sample.cpu_utilization_avg_cores,
+        "cpu_utilization_avg_pct": sample.cpu_utilization_avg_pct,
         "memory_rss_bytes_before": sample.rss_bytes_before,
         "memory_rss_bytes_after": sample.rss_bytes_after,
-        "memory_footprint_bytes": max(memory_values) if memory_values else None,
+        "memory_rss_bytes_peak": sample.rss_bytes_peak,
+        "memory_footprint_bytes": sample.rss_bytes_peak,
         "disk_read_bytes_delta": sample.read_bytes_delta,
         "disk_write_bytes_delta": sample.write_bytes_delta,
+        "disk_read_bytes_per_s": sample.disk_read_bytes_per_s,
+        "disk_write_bytes_per_s": sample.disk_write_bytes_per_s,
         "net_rx_bytes_delta": sample.net_rx_bytes_delta,
         "net_tx_bytes_delta": sample.net_tx_bytes_delta,
+        "net_rx_bytes_per_s": sample.net_rx_bytes_per_s,
+        "net_tx_bytes_per_s": sample.net_tx_bytes_per_s,
         "context_switches_delta": sample.ctx_switches_delta,
         "target_pid": sample.target_pid,
         "process_count_before": sample.process_count_before,
         "process_count_after": sample.process_count_after,
+        "timeline_truncated": sample.resource_timeline_truncated,
+        "timeline": sample.resource_timeline,
     }
