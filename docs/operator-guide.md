@@ -208,11 +208,12 @@ Run a task that forces a shell tool call:
 ```bash
 cd ~/claw
 openclaw agent --local --agent main --model "$OPENCLAW_TEST_MODEL" \
-  --message 'Use the shell to run: python3 -c "import pathlib, time; pathlib.Path(\"openclaw_trace_probe.txt\").write_text(\"trace-probe\\n\"); print(2 + 2); time.sleep(1)". Then summarize the result.'
+  --message 'Use the shell to run: python3 -c "from pathlib import Path; import hashlib, math, os, time; p=Path(\"openclaw_trace_probe.bin\"); blob=bytearray(os.urandom(16*1024*1024)); total=sum(math.sqrt(i) for i in range(2000000)); digest=hashlib.sha256(blob).hexdigest()[:16]; p.write_bytes(blob); data=p.read_bytes(); time.sleep(0.5); print(\"heavy-ok\", len(data), int(total), digest)". Then summarize the result.'
 ```
 
 This should create a real OpenClaw model turn and a real OpenClaw `exec` tool
-call. The plugin observes those hooks and the sidecar writes the trace.
+call with visible CPU, memory, and disk activity. The plugin observes those
+hooks and the sidecar writes the trace.
 
 ## 7. Inspect The Real Trace
 

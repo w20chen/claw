@@ -81,6 +81,7 @@ Use `npm.cmd` on Windows PowerShell when `npm.ps1` is blocked.
   - 3 tests passed.
 - Passed: `cd services/scheduler && python3 -m pytest tests -q`
   - 20 tests passed.
+- Passed: `python3 -m py_compile tools\demo_trace_recorder.py tools\demo_supported_features.py services\scheduler\src\agent_scheduler\trace.py services\scheduler\src\agent_scheduler\monitoring\tool_runtime.py`
 - Passed: `cd packages/openclaw-plugin && npm.cmd test`
   - 4 Node tests passed.
 - Passed: `cd packages/openclaw-plugin && npm.cmd run typecheck`
@@ -89,6 +90,8 @@ Use `npm.cmd` on Windows PowerShell when `npm.ps1` is blocked.
 
 - OpenClaw validated baseline: `2026.7.1`.
 - PowerShell may block npm `.ps1` shims; use `.cmd`.
+- On Windows, pass `--basetemp .pytest-tmp-root` so pytest writes temporary
+  files inside the workspace.
 - Full live OpenClaw agent validation still depends on local model auth.
 - Docker/Podman validation for `agent-test-bench` must be run on a host with
   container support.

@@ -225,6 +225,7 @@ def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Pa
     assert tool_record["type"] == "action"
     assert tool_record["action_id"] == "call-trace"
     assert tool_record["agent_id"] == "agent-trace"
+    assert 1.9 <= tool_record["ts_end"] - tool_record["ts_start"] <= 2.1
     assert tool_record["data"]["tool_name"] == "exec"
     assert tool_record["data"]["tool_args"] == {"command": "pytest tests/test_trace.py"}
     assert tool_record["data"]["tool_result"] == "2 passed"

@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate one raw trace + resource demo run.")
+    parser = argparse.ArgumentParser(description="Generate one heavier raw trace + resource demo run.")
     parser.add_argument("--endpoint", default="http://127.0.0.1:8765")
     args = parser.parse_args()
 
@@ -36,7 +36,7 @@ def main() -> None:
 def emit_model_turn(endpoint: str, run_id: str, agent_id: str) -> None:
     call_id = f"llm-{uuid4().hex[:8]}"
     messages = [
-        {"role": "user", "content": "Run a small Python tool and report the result."}
+        {"role": "user", "content": "Run a heavier Python tool and report the result."}
     ]
     started_at = utc_now()
     post_json(
@@ -71,8 +71,8 @@ def emit_model_turn(endpoint: str, run_id: str, agent_id: str) -> None:
             "outcome": "success",
             "context_token_budget": 8192,
             "raw_input": None,
-            "raw_output": "I will run the Python demo tool.",
-            "raw_event": {"content": "I will run the Python demo tool."},
+            "raw_output": "I will run the heavier Python demo tool.",
+            "raw_event": {"content": "I will run the heavier Python demo tool."},
         },
     )
 
@@ -80,24 +80,33 @@ def emit_model_turn(endpoint: str, run_id: str, agent_id: str) -> None:
 def emit_tool_turn(endpoint: str, run_id: str, agent_id: str) -> None:
     tool_call_id = f"tool-{uuid4().hex[:8]}"
     output_path = ROOT / "data" / "trace-demo-tool-output.txt"
+    binary_path = ROOT / "data" / "trace-demo-tool-payload.bin"
     command = [
         sys.executable,
         "-c",
         (
             "from pathlib import Path\n"
-            "import math, sys, time\n"
+            "import hashlib, math, os, time\n"
             f"p = Path({str(output_path)!r})\n"
+            f"b = Path({str(binary_path)!r})\n"
             "p.parent.mkdir(parents=True, exist_ok=True)\n"
-            "payload = ('trace-demo-data\\n' * 512)\n"
+            "blob = bytearray(os.urandom(16 * 1024 * 1024))\n"
             "total = 0.0\n"
-            "for i in range(250000):\n"
-            "    total += math.sqrt(i)\n"
-            "p.write_text(f'demo-tool-result total={total:.2f} bytes={len(payload)}\\n' + payload, encoding='utf-8')\n"
-            "time.sleep(2.0)\n"
-            "print(f'demo-tool-result total={total:.2f} bytes={len(payload)}')\n"
+            "digest = hashlib.sha256()\n"
+            "for _ in range(24):\n"
+            "    for i in range(0, len(blob), 4096):\n"
+            "        blob[i] = (blob[i] + 1) % 256\n"
+            "    digest.update(blob)\n"
+            "    total += sum(math.sqrt(i) for i in range(20000))\n"
+            "b.write_bytes(blob)\n"
+            "read_back = b.read_bytes()\n"
+            "time.sleep(0.5)\n"
+            "p.write_text(f'demo-tool-result total={total:.2f} bytes={len(read_back)} sha256={digest.hexdigest()[:16]}\\n', encoding='utf-8')\n"
+            "print(f'demo-tool-result total={total:.2f} bytes={len(read_back)} sha256={digest.hexdigest()[:16]}')\n"
         ),
     ]
     output_path.unlink(missing_ok=True)
+    binary_path.unlink(missing_ok=True)
     process = subprocess.Popen(
         command,
         cwd=str(ROOT),
@@ -127,17 +136,27 @@ def emit_tool_turn(endpoint: str, run_id: str, agent_id: str) -> None:
         "tool_kind": "shell",
         "tool_input_kind": "json",
         "operation_hint": "python",
-        "derived_paths": [str(output_path)],
+        "derived_paths": [str(output_path), str(binary_path)],
         "params_digest": "sha256:" + "2" * 64,
         "param_features": {
             "serialized_size_bytes": 128,
             "string_length": 64,
             "list_item_count": 0,
-            "path_count": 1,
+            "path_count": 2,
             "has_command_like_field": True,
         },
-        "raw_params": {"command": " ".join(command), "cwd": str(ROOT)},
-        "raw_event": {"params": {"command": " ".join(command), "cwd": str(ROOT)}},
+        "raw_params": {
+            "command": " ".join(command),
+            "cwd": str(ROOT),
+            "workload": "cpu-memory-disk",
+        },
+        "raw_event": {
+            "params": {
+                "command": " ".join(command),
+                "cwd": str(ROOT),
+                "workload": "cpu-memory-disk",
+            }
+        },
         "resource_scope": scope,
     }
     decision = post_json(endpoint, "/v1/decisions/tool", request)

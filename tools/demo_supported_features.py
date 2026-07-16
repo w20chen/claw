@@ -20,7 +20,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Demonstrate supported scheduler features.")
     parser.add_argument("--endpoint", default="http://127.0.0.1:8765")
     parser.add_argument("--run-launcher", action="store_true")
-    parser.add_argument("--command", default="python -c \"print('claw-launch-ok')\"")
+    parser.add_argument(
+        "--command",
+        default=(
+            "python3 -c \"from pathlib import Path; import hashlib, math, os, time; "
+            "p=Path('data/demo-supported-heavy.bin'); p.parent.mkdir(parents=True, exist_ok=True); "
+            "blob=bytearray(os.urandom(16*1024*1024)); "
+            "total=sum(math.sqrt(i) for i in range(2000000)); "
+            "digest=hashlib.sha256(blob).hexdigest()[:16]; "
+            "p.write_bytes(blob); data=p.read_bytes(); time.sleep(0.5); "
+            "print('claw-launch-heavy-ok', len(data), int(total), digest)\""
+        ),
+    )
     parser.add_argument("--cpu-set", default=None)
     parser.add_argument("--numa-node", type=int, default=None)
     args = parser.parse_args()

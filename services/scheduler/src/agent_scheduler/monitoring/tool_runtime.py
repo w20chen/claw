@@ -96,13 +96,18 @@ class RealtimeToolMonitor:
             start = active.snapshot
             operation = active.operation
             resource_class = active.resource_class
+        wall_started_at, wall_ended_at = _wall_times_from_duration(
+            start.captured_at,
+            end.captured_at,
+            completion.duration_ms,
+        )
         return ToolRuntimeSample(
             event_id=completion.event_id,
             tool_call_id=completion.tool_call_id,
             tool_name=completion.tool_name,
             operation=operation,
-            started_at=start.captured_at,
-            ended_at=end.captured_at,
+            started_at=wall_started_at,
+            ended_at=wall_ended_at,
             duration_ms=completion.duration_ms,
             monitor_duration_ms=max(0, int((end.monotonic_s - start.monotonic_s) * 1000)),
             cpu_time_delta_s=_delta_float(start.process_cpu_time_s, end.process_cpu_time_s),
@@ -205,3 +210,14 @@ def _attribution_status(start: ResourceSnapshot, end: ResourceSnapshot) -> str:
     if start.available and end.available:
         return "pid"
     return "pid-unavailable"
+
+
+def _wall_times_from_duration(started_at: float, ended_at: float, duration_ms: int) -> tuple[float, float]:
+    duration_s = max(0.0, duration_ms / 1000)
+    if duration_s <= 0:
+        return started_at, ended_at
+    if ended_at < started_at:
+        ended_at = started_at
+    if ended_at - started_at < duration_s:
+        started_at = ended_at - duration_s
+    return started_at, ended_at

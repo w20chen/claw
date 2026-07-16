@@ -126,7 +126,7 @@ export OPENCLAW_HARDWARE_SCHEDULER_SECURITY_BOUNDARY_ACCEPTED=true
 openclaw models list
 export OPENCLAW_TEST_MODEL='<provider/model-from-openclaw-models-list>'
 openclaw agent --local --agent main --model "$OPENCLAW_TEST_MODEL" \
-  --message 'Use the shell to run: python3 -c "print(2 + 2)". Then summarize the result.'
+  --message 'Use the shell to run: python3 -c "from pathlib import Path; import hashlib, math, os, time; p=Path(\"openclaw_trace_probe.bin\"); blob=bytearray(os.urandom(16*1024*1024)); total=sum(math.sqrt(i) for i in range(2000000)); digest=hashlib.sha256(blob).hexdigest()[:16]; p.write_bytes(blob); data=p.read_bytes(); time.sleep(0.5); print(\"heavy-ok\", len(data), int(total), digest)". Then summarize the result.'
 
 curl http://127.0.0.1:8765/v1/tools/recent
 curl http://127.0.0.1:8765/metrics

@@ -35,14 +35,15 @@ class AgentTestBenchTraceWriter:
     def record_tool(self, event: ToolCompletedEvent, sample: ToolRuntimeSample) -> None:
         start = self._pop_tool_start(event)
         tool_args = None if start is None else start.raw_params
+        ts_start, ts_end = _tool_timestamps(sample, event.duration_ms)
         self._append(
             {
                 "type": "action",
                 "action_type": "tool_exec",
                 "action_id": event.tool_call_id or event.event_id,
                 "agent_id": event.agent_id,
-                "ts_start": sample.started_at,
-                "ts_end": sample.ended_at,
+                "ts_start": ts_start,
+                "ts_end": ts_end,
                 "data": {
                     "tool_name": event.tool_name,
                     "tool_args": tool_args,
@@ -118,6 +119,17 @@ def _parse_timestamp(value: str) -> float:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
     except ValueError:
         return datetime.now(timezone.utc).timestamp()
+
+
+def _tool_timestamps(sample: ToolRuntimeSample, duration_ms: int) -> tuple[float, float]:
+    ts_start = sample.started_at
+    ts_end = sample.ended_at
+    duration_s = max(0.0, duration_ms / 1000)
+    if ts_end < ts_start:
+        ts_end = ts_start
+    if duration_s > 0 and ts_end - ts_start < duration_s:
+        ts_start = ts_end - duration_s
+    return ts_start, ts_end
 
 
 def _tool_key(tool_call_id: str | None, event_id: str) -> str:
