@@ -5,13 +5,13 @@ resource monitoring, and future hardware-aware scheduling.
 
 The project boundary is intentionally narrow:
 
-- Deliverable: an OpenClaw plugin, scheduler sidecar, and reference launcher.
+- Deliverable: an OpenClaw plugin, scheduler sidecar, reference launcher, and
+  OpenAI-compatible LLM proxy.
 - No OpenClaw core changes.
 - No `agent-test-bench` runtime import.
 - JSON Schema under `contracts/` is the protocol source of truth.
-- Raw trace capture is opt-in with plugin `recordRawTrace=true`. When enabled,
-  the plugin records the OpenClaw hook payload fields it can see, without
-  modifying OpenClaw core.
+- Full LLM trace capture uses the sidecar LLM proxy. Raw tool trace capture is
+  opt-in with plugin `recordRawTrace=true`.
 
 ## What Works Now
 
@@ -26,10 +26,11 @@ The project boundary is intentionally narrow:
   - disk read/write bytes
   - best-effort network rx/tx bytes
   - context switches
-- Optional live `trace.jsonl` writer shaped like `agent-test-bench` v5:
-  `trace_metadata`, `llm_call`, and `tool_exec`. With `recordRawTrace=true`,
-  records include visible model input/output, tool args/results, and raw hook
-  event payloads.
+- Live `trace.jsonl` writer shaped like `agent-test-bench` v5:
+  `trace_metadata`, `llm_call`, and `tool_exec`. The default full-trace path is
+  to route OpenClaw model traffic through the sidecar LLM proxy, which records
+  full request messages and response content. With `recordRawTrace=true`, tool
+  hooks record visible tool args/results and raw hook event payloads.
 - `exec` backends:
   - `hook-only`: observe only.
   - `marker`: preserve command and inject correlation env vars.
@@ -49,6 +50,9 @@ The project boundary is intentionally narrow:
   sample is marked `unattributed`.
 - Network I/O uses `/proc/<pid>/net/dev`, so it is best-effort Linux network
   namespace accounting, not exact per-process eBPF accounting.
+- Full LLM request/response capture requires routing the selected OpenClaw
+  provider through the sidecar proxy. If the provider bypasses the proxy, model
+  hook records may contain metadata only.
 - NUMA memory policy, PMU/ksys/VTune wrapping, GPU/KV-cache scheduling, and a
   hardened static launcher are future work.
 
@@ -75,7 +79,15 @@ cd services/scheduler
 export PYTHONPATH=src
 export AGENT_SCHEDULER_DB_PATH=../../data/scheduler.sqlite3
 export AGENT_SCHEDULER_TRACE_PATH=../../data/trace.jsonl
+export AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL=https://api.deepseek.com/v1
+export AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY="$DEEPSEEK_API_KEY"
 python3 -m agent_scheduler.main --host 127.0.0.1 --port 8765
+```
+
+Configure your OpenClaw model provider base URL to the sidecar proxy:
+
+```bash
+http://127.0.0.1:8765/v1
 ```
 
 Link the plugin:
@@ -143,6 +155,9 @@ Sidecar:
 
 - `AGENT_SCHEDULER_DB_PATH`: SQLite path.
 - `AGENT_SCHEDULER_TRACE_PATH`: optional live `trace.jsonl` output.
+- `AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL`: real OpenAI-compatible provider
+  base URL used by the default LLM proxy path.
+- `AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY`: optional upstream provider API key.
 - `AGENT_SCHEDULER_POLICY`: `observe-only` or `concurrency`.
 - `AGENT_SCHEDULER_TOOL_PROFILES`: optional scheduler profile JSON.
 
@@ -153,8 +168,8 @@ Plugin:
 - `executionBackend`: `hook-only`, `marker`, or `managed-wrapper`.
 - `launcherPath`: path to `claw-launch` for `managed-wrapper`.
 - `securityBoundaryAccepted`: required for `managed-wrapper`.
-- `recordRawTrace`: set `true` to record visible OpenClaw hook input/output
-  content into `trace.jsonl`.
+- `recordRawTrace`: set `true` to record visible OpenClaw tool hook
+  args/results into `trace.jsonl`.
 
 ## Docs
 

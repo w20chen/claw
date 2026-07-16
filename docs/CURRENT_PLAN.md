@@ -12,7 +12,8 @@ not in this working plan.
   - Sidecar protocol and persistence.
   - Per-tool runtime resource monitoring.
   - Live agent-test-bench-style `trace.jsonl`.
-  - Optional raw model/tool trace capture through plugin hooks.
+  - Full LLM trace capture through the sidecar LLM proxy.
+  - Raw tool trace capture through plugin hooks.
 
 ## Implemented
 
@@ -42,8 +43,12 @@ not in this working plan.
   - compact per-tool resource timeline
 - Optional `AGENT_SCHEDULER_TRACE_PATH` live trace writer.
 - CLI trace visualization with `tools/inspect_trace.py`.
-- Optional plugin `recordRawTrace=true` capture of hook-visible model
-  input/output, tool args/results, and raw hook payloads.
+- OpenAI-compatible LLM proxy for full request/response capture:
+  - `/v1/models`
+  - `/v1/chat/completions`
+  - streaming response reconstruction
+- Optional plugin `recordRawTrace=true` capture of hook-visible tool
+  args/results and raw hook payloads.
 - Offline `agent-test-bench` trace importer and benchmark adapter.
 
 ## Current Boundaries
@@ -53,8 +58,10 @@ not in this working plan.
 - Resource attribution is reliable only with trusted PID or cgroup scope.
 - Network I/O is namespace-level best effort from `/proc/<pid>/net/dev`.
 - Tools without scope are traced but marked `unattributed`.
-- Raw model/tool content is recorded only when the plugin is explicitly
-  configured with `recordRawTrace=true`.
+- Full LLM content is recorded only when OpenClaw routes the selected provider
+  through the sidecar LLM proxy.
+- Raw tool content is recorded only when the plugin is explicitly configured
+  with `recordRawTrace=true`.
 - Do not modify OpenClaw core.
 - Do not modify `C:\Users\29068\Desktop\agent-test-bench`.
 
@@ -82,8 +89,8 @@ Use `npm.cmd` on Windows PowerShell when `npm.ps1` is blocked.
 - Passed: `python3 -m pytest tests -q --basetemp .pytest-tmp-root`
   - 3 tests passed.
 - Passed: `cd services/scheduler && python3 -m pytest tests -q`
-  - 20 tests passed.
-- Passed: `python3 -m py_compile tools\inspect_trace.py services\scheduler\src\agent_scheduler\monitoring\process.py services\scheduler\src\agent_scheduler\monitoring\tool_runtime.py services\scheduler\src\agent_scheduler\trace.py services\scheduler\src\agent_scheduler\telemetry\metrics.py services\scheduler\src\agent_scheduler\config.py services\scheduler\src\agent_scheduler\api\dependencies.py`
+  - 23 tests passed.
+- Passed: `python3 -m py_compile services\scheduler\src\agent_scheduler\llm_proxy.py services\scheduler\src\agent_scheduler\api\app.py services\scheduler\src\agent_scheduler\trace.py services\scheduler\src\agent_scheduler\config.py`
 - Passed: `python3 tools\inspect_trace.py tests\fixtures\agent_test_bench_trace.jsonl --all --details --width 100`
 - Passed: `python3 tools\inspect_trace.py tests\fixtures\agent_test_bench_trace.jsonl --all --details --timeline --width 100`
 - Passed: `cd packages/openclaw-plugin && npm.cmd test`

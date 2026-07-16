@@ -15,7 +15,7 @@ full run sequence, use [operator-guide.md](operator-guide.md).
 | Runtime samples | Supported | CPU avg, RSS peak, disk/network throughput, context switches when scoped. |
 | Live `trace.jsonl` | Supported | Enable with `AGENT_SCHEDULER_TRACE_PATH`. |
 | CLI trace visualization | Supported | Use `tools/inspect_trace.py` for timeline/detail views. |
-| agent-test-bench format | Supported | v5-shaped records; raw content requires `recordRawTrace=true`. |
+| agent-test-bench format | Supported | v5-shaped records; full LLM content uses proxy, raw tool content requires `recordRawTrace=true`. |
 | Plugin hooks | Supported | `before_tool_call`, `after_tool_call`, model start/end. |
 | `exec` hook-only | Supported | No param rewrite. |
 | `exec` marker mode | Supported | Adds correlation env vars. |
@@ -93,4 +93,5 @@ python3 -m pytest tests -q --basetemp .pytest-tmp-root
 {"type":"action","action_type":"tool_exec","action_id":"...","data":{"tool_name":"exec","tool_args":{"command":"pytest"},"tool_result":"...","resource_usage":{"attribution_status":"pid"}}}
 ```
 
-The plugin records raw model/tool content only when `recordRawTrace=true`.
+The LLM proxy records raw model request/response content. The plugin records
+raw tool content only when `recordRawTrace=true`.

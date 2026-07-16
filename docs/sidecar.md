@@ -9,6 +9,10 @@ Endpoints:
 - `GET /v1/status`
 - `GET /metrics`
 - `GET /v1/tools/recent`
+- `GET /v1/models`
+- `GET /models`
+- `POST /v1/chat/completions`
+- `POST /chat/completions`
 - `POST /v1/decisions/tool`
 - `POST /v1/events/tool-completed`
 - `POST /v1/events/model`
@@ -20,6 +24,27 @@ Endpoints:
 
 SQLite is used for lightweight persistence. Writes are parameterized and use
 idempotent keys so duplicate events do not crash the service.
+
+## LLM Proxy
+
+The sidecar includes an OpenAI-compatible proxy and this is the default path
+for complete LLM trace capture. Configure OpenClaw's provider base URL to:
+
+```text
+http://127.0.0.1:8765/v1
+```
+
+Configure the real upstream provider on the sidecar:
+
+```bash
+export AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL=https://api.deepseek.com/v1
+export AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY="$DEEPSEEK_API_KEY"
+```
+
+The proxy forwards `/v1/models` and `/v1/chat/completions` to the upstream
+provider. Non-streaming and streaming chat completions are recorded as
+`llm_call` actions in `trace.jsonl`, including `messages_in`, reconstructed
+`content`, `raw_request`, and `raw_response`.
 
 ## Real-time Tool Monitoring
 
@@ -33,8 +58,10 @@ tools, at the cost of more sidecar overhead.
 
 The sidecar writes one aggregate runtime sample when the tool completes. It
 also stores a compact per-tool `resource_timeline` inside that final sample,
-up to `AGENT_SCHEDULER_RESOURCE_TIMELINE_MAX_POINTS` points. It does not append
-one JSONL record per polling tick.
+up to `AGENT_SCHEDULER_RESOURCE_TIMELINE_MAX_POINTS` points. Timeline points
+are normalized to relative deltas and interval rates; raw network namespace
+counters are not shown as absolute byte totals. The sidecar does not append one
+JSONL record per polling tick.
 
 Stored sample fields include:
 
@@ -55,6 +82,11 @@ Stored sample fields include:
   when a trusted scope includes `kind: "cgroup-v2"` and `cgroup_path`
 - best-effort network rx/tx deltas from `/proc/<pid>/net/dev`
 - predicted `resource_class`
+
+For cgroup-v2 scopes, network counters are treated as auxiliary data only. A
+sample is considered `cgroup-v2` only when at least one core cgroup metric is
+available, such as CPU usage, memory, I/O, process membership, or context
+switches. If not, the sampler falls back to PID/process-tree sampling.
 
 Inspect the most recent samples:
 
@@ -85,9 +117,9 @@ Useful metrics:
 - `scheduler_tool_context_switches_total`
 
 Set `AGENT_SCHEDULER_TRACE_PATH` to append live agent-test-bench v5-shaped
-`trace.jsonl` records. Tool args/results and model input/output are populated
-when the plugin sends raw fields with `recordRawTrace=true`; otherwise they are
-`null`.
+`trace.jsonl` records. Full model input/output is populated when OpenClaw uses
+the LLM proxy. Tool args/results are populated when the plugin sends raw fields
+with `recordRawTrace=true`; otherwise they are `null`.
 
 ## Managed Execution Registration
 

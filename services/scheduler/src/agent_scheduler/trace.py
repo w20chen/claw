@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+from uuid import uuid4
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -88,6 +89,53 @@ class AgentTestBenchTraceWriter:
                     "context_token_budget": event.context_token_budget,
                     "openclaw_started_event": None if start is None else start.raw_event,
                     "openclaw_ended_event": event.raw_event,
+                },
+            }
+        )
+
+    def record_llm_proxy_call(
+        self,
+        *,
+        action_id: str | None,
+        provider: str | None,
+        model: str | None,
+        messages_in: Any | None,
+        content: Any | None,
+        raw_request: Any | None,
+        raw_response: Any | None,
+        ts_start: float,
+        ts_end: float,
+        status_code: int,
+        stream: bool,
+        error: str | None = None,
+    ) -> None:
+        duration_ms = max(0.0, (ts_end - ts_start) * 1000)
+        self._append(
+            {
+                "type": "action",
+                "action_type": "llm_call",
+                "action_id": action_id or f"llm-proxy-{uuid4()}",
+                "agent_id": None,
+                "ts_start": ts_start,
+                "ts_end": ts_end,
+                "data": {
+                    "provider": provider,
+                    "model": model,
+                    "messages_in": messages_in,
+                    "content": content,
+                    "duration_ms": int(duration_ms),
+                    "llm_latency_ms": duration_ms,
+                    "outcome": "error" if error else "completed",
+                    "context_token_budget": None,
+                    "proxy": {
+                        "status_code": status_code,
+                        "stream": stream,
+                        "error": error,
+                    },
+                    "openclaw_started_event": None,
+                    "openclaw_ended_event": None,
+                    "raw_request": raw_request,
+                    "raw_response": raw_response,
                 },
             }
         )

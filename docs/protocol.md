@@ -30,6 +30,8 @@ Tool request messages may include:
   attributed when this scope is present and readable.
 - `raw_params` and `raw_event`: optional raw trace fields populated only when
   the plugin is configured with `recordRawTrace=true` or `sendRawParams=true`.
+  Full LLM request/response content is captured by the sidecar LLM proxy, not
+  by OpenClaw model hooks.
 
 Tool completion messages may include:
 

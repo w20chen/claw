@@ -4,11 +4,13 @@ import json
 import os
 from pathlib import Path
 
+import httpx
 from fastapi.testclient import TestClient
 
 from agent_scheduler.api.app import create_app
 from agent_scheduler.api.dependencies import build_state
 from agent_scheduler.config import SchedulerConfig
+from agent_scheduler.monitoring.tool_runtime import _relative_timeline
 
 
 def _client(tmp_path: Path) -> TestClient:
@@ -19,6 +21,18 @@ def _client(tmp_path: Path) -> TestClient:
 def _trace_client(tmp_path: Path) -> tuple[TestClient, Path]:
     trace_path = tmp_path / "trace.jsonl"
     state = build_state(SchedulerConfig(db_path=tmp_path / "test.sqlite3", trace_path=trace_path))
+    return TestClient(create_app(state)), trace_path
+
+
+def _trace_proxy_client(tmp_path: Path) -> tuple[TestClient, Path]:
+    trace_path = tmp_path / "trace.jsonl"
+    state = build_state(
+        SchedulerConfig(
+            db_path=tmp_path / "test.sqlite3",
+            trace_path=trace_path,
+            llm_proxy_upstream_base_url="https://upstream.example/v1",
+        )
+    )
     return TestClient(create_app(state)), trace_path
 
 
@@ -129,6 +143,48 @@ def test_metrics_endpoint(tmp_path: Path) -> None:
     assert "scheduler_tool_net_tx_bytes_total" in response.text
     assert "scheduler_tool_io_write_bytes_per_second" in response.text
     assert "scheduler_tool_net_tx_bytes_per_second" in response.text
+
+
+def test_resource_timeline_uses_interval_rates() -> None:
+    timeline = _relative_timeline(
+        [
+            {
+                "ts": 10.0,
+                "cpu_time_s": 1.0,
+                "rss_bytes": 100,
+                "read_bytes": 0,
+                "write_bytes": 0,
+                "net_rx_bytes": 1_000_000,
+                "net_tx_bytes": 2_000_000,
+                "ctx_switches": 5,
+                "process_count": 1,
+                "available": True,
+                "source": "psutil-process-tree",
+            },
+            {
+                "ts": 10.5,
+                "cpu_time_s": 1.2,
+                "rss_bytes": 200,
+                "read_bytes": 128,
+                "write_bytes": 512,
+                "net_rx_bytes": 1_001_000,
+                "net_tx_bytes": 2_002_000,
+                "ctx_switches": 8,
+                "process_count": 1,
+                "available": True,
+                "source": "psutil-process-tree",
+            },
+        ]
+    )
+
+    assert timeline[0]["net_rx_bytes_delta"] == 0
+    assert timeline[0]["net_rx_bytes_per_s"] is None
+    assert timeline[1]["elapsed_ms"] == 500
+    assert abs(timeline[1]["cpu_time_delta_s"] - 0.2) < 0.001
+    assert timeline[1]["net_rx_bytes_delta"] == 1_000
+    assert timeline[1]["net_tx_bytes_delta"] == 2_000
+    assert timeline[1]["net_rx_bytes_per_s"] == 2_000
+    assert timeline[1]["net_tx_bytes_per_s"] == 4_000
 
 
 def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Path) -> None:
@@ -259,6 +315,63 @@ def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Pa
     assert model_records[0]["data"]["model"] == "test-model"
     assert model_records[0]["data"]["messages_in"] == [{"role": "user", "content": "run tests"}]
     assert model_records[0]["data"]["content"] == "done"
+
+
+def test_llm_proxy_records_full_request_and_response(tmp_path: Path, monkeypatch) -> None:
+    client, trace_path = _trace_proxy_client(tmp_path)
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def post(self, url, headers=None, content=None):
+            assert url == "https://upstream.example/v1/chat/completions"
+            request_payload = json.loads(content.decode("utf-8"))
+            assert request_payload["messages"][0]["content"] == "hello"
+            return httpx.Response(
+                200,
+                json={
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion",
+                    "model": request_payload["model"],
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "world"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+
+    monkeypatch.setattr("agent_scheduler.llm_proxy.httpx.AsyncClient", FakeAsyncClient)
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "hello"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"]["content"] == "world"
+    records = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+    llm_records = [record for record in records if record.get("action_type") == "llm_call"]
+    assert len(llm_records) == 1
+    data = llm_records[0]["data"]
+    assert data["provider"] == "llm-proxy"
+    assert data["model"] == "test-model"
+    assert data["messages_in"] == [{"role": "user", "content": "hello"}]
+    assert data["content"] == "world"
+    assert data["raw_request"]["messages"][0]["content"] == "hello"
+    assert data["raw_response"]["choices"][0]["message"]["content"] == "world"
 
 
 def test_execution_registration_round_trip(tmp_path: Path) -> None:

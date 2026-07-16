@@ -151,6 +151,7 @@ class RealtimeToolMonitor:
         net_rx_delta = _delta_int(start.net_rx_bytes, end.net_rx_bytes)
         net_tx_delta = _delta_int(start.net_tx_bytes, end.net_tx_bytes)
         cpu_avg_cores = _rate(cpu_delta, duration_s)
+        normalized_timeline = _relative_timeline(timeline)
         return ToolRuntimeSample(
             event_id=completion.event_id,
             tool_call_id=completion.tool_call_id,
@@ -185,7 +186,7 @@ class RealtimeToolMonitor:
                 duration_ms=completion.duration_ms,
                 poll_interval_s=self.poll_interval_s,
             ),
-            resource_timeline=timeline,
+            resource_timeline=normalized_timeline,
             resource_timeline_truncated=timeline_truncated,
             resource_class=resource_class,
             target_pid=end.target_pid if end.target_pid is not None else start.target_pid,
@@ -331,6 +332,71 @@ def _timeline_point(snapshot: ResourceSnapshot) -> dict[str, Any]:
         "available": snapshot.available,
         "source": snapshot.source,
     }
+
+
+def _relative_timeline(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not points:
+        return []
+    base = points[0]
+    out: list[dict[str, Any]] = []
+    prev: dict[str, Any] | None = None
+    for point in points:
+        elapsed_s = _timeline_delta_float(base.get("ts"), point.get("ts"))
+        interval_s = None if prev is None else _timeline_delta_float(prev.get("ts"), point.get("ts"))
+        read_delta = _timeline_counter_delta(base.get("read_bytes"), point.get("read_bytes"))
+        write_delta = _timeline_counter_delta(base.get("write_bytes"), point.get("write_bytes"))
+        net_rx_delta = _timeline_counter_delta(base.get("net_rx_bytes"), point.get("net_rx_bytes"))
+        net_tx_delta = _timeline_counter_delta(base.get("net_tx_bytes"), point.get("net_tx_bytes"))
+        ctx_delta = _timeline_counter_delta(base.get("ctx_switches"), point.get("ctx_switches"))
+        point_read_delta = None if prev is None else _timeline_counter_delta(prev.get("read_bytes"), point.get("read_bytes"))
+        point_write_delta = None if prev is None else _timeline_counter_delta(prev.get("write_bytes"), point.get("write_bytes"))
+        point_net_rx_delta = None if prev is None else _timeline_counter_delta(prev.get("net_rx_bytes"), point.get("net_rx_bytes"))
+        point_net_tx_delta = None if prev is None else _timeline_counter_delta(prev.get("net_tx_bytes"), point.get("net_tx_bytes"))
+        out.append(
+            {
+                "ts": point.get("ts"),
+                "elapsed_ms": None if elapsed_s is None else int(elapsed_s * 1000),
+                "cpu_time_delta_s": _timeline_counter_delta(base.get("cpu_time_s"), point.get("cpu_time_s")),
+                "rss_bytes": point.get("rss_bytes"),
+                "read_bytes_delta": read_delta,
+                "write_bytes_delta": write_delta,
+                "net_rx_bytes_delta": net_rx_delta,
+                "net_tx_bytes_delta": net_tx_delta,
+                "ctx_switches_delta": ctx_delta,
+                "read_bytes_per_s": _rate(point_read_delta, interval_s),
+                "write_bytes_per_s": _rate(point_write_delta, interval_s),
+                "net_rx_bytes_per_s": _rate(point_net_rx_delta, interval_s),
+                "net_tx_bytes_per_s": _rate(point_net_tx_delta, interval_s),
+                "process_count": point.get("process_count"),
+                "available": point.get("available"),
+                "source": point.get("source"),
+            }
+        )
+        prev = point
+    return out
+
+
+def _timeline_counter_delta(start: Any, end: Any) -> float | int | None:
+    if start is None or end is None:
+        return None
+    try:
+        delta = float(end) - float(start)
+    except (TypeError, ValueError):
+        return None
+    if delta < 0:
+        return 0
+    if isinstance(start, int) and isinstance(end, int):
+        return int(delta)
+    return delta
+
+
+def _timeline_delta_float(start: Any, end: Any) -> float | None:
+    if start is None or end is None:
+        return None
+    try:
+        return max(0.0, float(end) - float(start))
+    except (TypeError, ValueError):
+        return None
 
 
 def _append_timeline(

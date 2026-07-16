@@ -22,9 +22,10 @@ It registers:
 It does not register `agent_end`, `llm_input`, `llm_output`,
 `before_agent_run`, or `registerAgentHarness` in the MVP.
 
-The plugin sends only allowlisted metadata and parameter features by default.
-Set `sendRawParams=true` only when explicitly required; recursive redaction is
-still applied before transport.
+The plugin records tool lifecycle events and can send hook-visible raw
+tool args/results when configured with `recordRawTrace=true`. Full LLM
+request/response capture is not taken from model hooks; the default full-trace
+path routes OpenClaw's OpenAI-compatible provider through the sidecar LLM proxy.
 
 ## Exec Instrumentation
 

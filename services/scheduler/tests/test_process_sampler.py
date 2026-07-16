@@ -34,3 +34,32 @@ def test_process_sampler_reads_cgroup_v2_scope(tmp_path) -> None:
     assert snapshot.read_bytes == 10
     assert snapshot.write_bytes == 20
     assert snapshot.target_pid == 123
+
+
+def test_cgroup_v2_requires_core_cgroup_metrics(tmp_path, monkeypatch) -> None:
+    sampler = ProcessResourceSampler()
+    monkeypatch.setattr(sampler, "_read_proc_net_dev", lambda _pid: (100, 200))
+
+    snapshot = sampler._snapshot_cgroup(
+        1.0,
+        1.0,
+        ResourceScope(
+            kind="cgroup-v2",
+            execution_id="exec-1",
+            pid=123,
+            root_pid=123,
+            process_start_time=None,
+            root_starttime_ticks=None,
+            cgroup_path=str(tmp_path),
+            pid_namespace_inode=None,
+            container_id=None,
+            include_children=True,
+            source="claw-launch",
+            attribution_source="claw-launch",
+        ),
+    )
+
+    assert snapshot.source == "cgroup-v2"
+    assert snapshot.net_rx_bytes == 100
+    assert snapshot.net_tx_bytes == 200
+    assert snapshot.available is False

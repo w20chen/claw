@@ -20,6 +20,9 @@ class SchedulerConfig:
     trace_path: Path | None = None
     resource_poll_interval_ms: int = 50
     resource_timeline_max_points: int = 2_000
+    llm_proxy_enabled: bool = True
+    llm_proxy_upstream_base_url: str | None = None
+    llm_proxy_upstream_api_key: str | None = None
 
     @classmethod
     def from_env(cls) -> "SchedulerConfig":
@@ -39,4 +42,8 @@ class SchedulerConfig:
             trace_path=Path(trace) if trace else None,
             resource_poll_interval_ms=int(os.getenv("AGENT_SCHEDULER_RESOURCE_POLL_INTERVAL_MS", "50")),
             resource_timeline_max_points=int(os.getenv("AGENT_SCHEDULER_RESOURCE_TIMELINE_MAX_POINTS", "2000")),
+            llm_proxy_enabled=os.getenv("AGENT_SCHEDULER_LLM_PROXY_ENABLED", "true").lower()
+            not in {"0", "false", "no"},
+            llm_proxy_upstream_base_url=os.getenv("AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL"),
+            llm_proxy_upstream_api_key=os.getenv("AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY"),
         )

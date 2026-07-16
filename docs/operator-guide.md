@@ -5,6 +5,7 @@ This guide is for the real target path:
 ```text
 OpenClaw agent task
   -> hardware-scheduler OpenClaw plugin hooks
+  -> sidecar LLM proxy for full LLM request/response capture
   -> scheduler sidecar
   -> agent-test-bench-style trace.jsonl
   -> per-tool CPU / memory / network / disk I/O resource usage
@@ -23,17 +24,15 @@ For a real OpenClaw run, the sidecar writes `trace.jsonl` records like:
 {"type":"action","action_type":"tool_exec","data":{"tool_name":"exec","tool_args":{"command":"..."},"tool_result":"...","resource_usage":{"cpu_time_delta_s":0.1,"cpu_utilization_avg_cores":0.2,"memory_rss_bytes_peak":12345678,"disk_write_bytes_per_s":4096.0,"net_tx_bytes_per_s":0.0,"sampling_quality":"ok","timeline":[...]}}}
 ```
 
-`recordRawTrace: true` is the important plugin switch. It tells the plugin to
-send the OpenClaw hook-visible model input/output, tool args/results, and raw
-hook payloads to the sidecar. If OpenClaw does not expose a specific internal
-field to plugin hooks, the plugin cannot record that field without changing
-OpenClaw itself.
+The default full-trace path uses the sidecar as an OpenAI-compatible LLM proxy.
+Configure OpenClaw's model provider base URL to `http://127.0.0.1:8765/v1`,
+and configure the sidecar's upstream base URL to the real provider. Then the
+sidecar records full LLM request messages and response content.
 
-In the currently observed OpenClaw `2026.7.1` model hooks, provider/model,
-duration, token budget, request/response byte counts, and transport metadata
-are visible, but full `messages_in` and model `content` may not be exposed to
-the plugin hook. Tool hooks do expose `params` and `result`, so `tool_args` and
-`tool_result` should be populated when `recordRawTrace=true`.
+`recordRawTrace: true` is still important for tool trace capture. It tells the
+plugin to send hook-visible tool args/results and raw hook payloads to the
+sidecar. OpenClaw model hooks are retained as fallback metadata, but full LLM
+input/output comes from the LLM proxy path.
 
 Resource fields are strongest for `exec` in `managed-wrapper` mode because
 `claw-launch` gives the sidecar a trusted PID or cgroup scope. Without a
@@ -165,6 +164,8 @@ export AGENT_SCHEDULER_DB_PATH=../../data/openclaw-trace.sqlite3
 export AGENT_SCHEDULER_TRACE_PATH=../../data/trace.jsonl
 export AGENT_SCHEDULER_RESOURCE_POLL_INTERVAL_MS=50
 export AGENT_SCHEDULER_RESOURCE_TIMELINE_MAX_POINTS=2000
+export AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL=https://api.deepseek.com/v1
+export AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY="$DEEPSEEK_API_KEY"
 python3 -m agent_scheduler.main --host 127.0.0.1 --port 8765
 ```
 
@@ -174,6 +175,17 @@ Check health from another shell:
 curl http://127.0.0.1:8765/health/live
 curl http://127.0.0.1:8765/health/ready
 ```
+
+Configure OpenClaw's provider base URL to the sidecar proxy:
+
+```text
+http://127.0.0.1:8765/v1
+```
+
+For OpenAI-compatible providers, the sidecar exposes `/v1/models` and
+`/v1/chat/completions`, forwards requests to
+`AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL`, and records the full request/response
+into `trace.jsonl`.
 
 ## 5. Export Plugin Runtime Overrides
 
@@ -243,7 +255,8 @@ You are looking for:
 - `cpu_utilization_avg_cores`, `memory_rss_bytes_peak`, disk/network
   `*_bytes_per_s`, and `sampling_quality` inside `resource_usage`
 - `resource_usage.timeline`, a compact list of sampled points attached to the
-  final tool action
+  final tool action. Timeline I/O and network columns are per-interval rates,
+  not raw cumulative kernel counters.
 
 ## 8. Optional cgroup Scope
 
@@ -314,6 +327,9 @@ If no model can run:
 
 - Fix OpenClaw model auth first with `openclaw models status` and the provider
   setup flow for your environment.
+- For full LLM input/output, confirm the selected provider is using
+  `http://127.0.0.1:8765/v1` as its base URL. If it bypasses the sidecar proxy,
+  model hook records may contain metadata only.
 
 ## 10. Sidecar-Only Smoke Test
 

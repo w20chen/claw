@@ -207,19 +207,20 @@ def print_timeline(resource_usage: Any) -> None:
         return
     suffix = " truncated" if resource_usage.get("timeline_truncated") else ""
     print(f"timeline:{suffix}")
-    print("  time                 cpu_s      rss        rd         wr         net_rx     net_tx     proc")
+    print("  time                 elapsed  cpu_s      rss        rd/s       wr/s       net_rx/s   net_tx/s   proc")
     for point in timeline:
         if not isinstance(point, dict):
             continue
         print(
             "  "
             f"{format_time(point.get('ts'))}  "
-            f"{format_float(point.get('cpu_time_s')).rjust(8)}  "
+            f"{format_elapsed_ms(point.get('elapsed_ms')).rjust(7)}  "
+            f"{format_float(point.get('cpu_time_delta_s')).rjust(8)}  "
             f"{format_bytes(point.get('rss_bytes')).rjust(9)}  "
-            f"{format_bytes(point.get('read_bytes')).rjust(9)}  "
-            f"{format_bytes(point.get('write_bytes')).rjust(9)}  "
-            f"{format_bytes(point.get('net_rx_bytes')).rjust(9)}  "
-            f"{format_bytes(point.get('net_tx_bytes')).rjust(9)}  "
+            f"{format_bytes_per_s(point.get('read_bytes_per_s')).rjust(9)}  "
+            f"{format_bytes_per_s(point.get('write_bytes_per_s')).rjust(9)}  "
+            f"{format_bytes_per_s(point.get('net_rx_bytes_per_s')).rjust(9)}  "
+            f"{format_bytes_per_s(point.get('net_tx_bytes_per_s')).rjust(9)}  "
             f"{str(point.get('process_count') or '-').rjust(4)}"
         )
 
@@ -340,6 +341,13 @@ def format_seconds(value: Any) -> str:
 def format_float(value: Any) -> str:
     try:
         return f"{float(value):.3f}"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def format_elapsed_ms(value: Any) -> str:
+    try:
+        return f"{int(value)}ms"
     except (TypeError, ValueError):
         return "-"
 

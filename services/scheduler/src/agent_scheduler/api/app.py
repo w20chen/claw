@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
 from agent_scheduler.api.dependencies import AppState, build_state
@@ -21,6 +21,7 @@ from agent_scheduler.contracts.models import (
     ToolBeforeRequest,
     ToolCompletedEvent,
 )
+from agent_scheduler.llm_proxy import proxy_chat_completions, proxy_models
 from agent_scheduler.policies.base import SchedulingContext
 from agent_scheduler.security.auth import verify_bearer
 
@@ -62,6 +63,22 @@ def create_app(state: AppState | None = None) -> FastAPI:
         _: None = Depends(auth),
     ) -> dict[str, object]:
         return {"samples": s.store.recent_tool_runtime_samples(limit)}
+
+    @app.get("/v1/models")
+    @app.get("/models")
+    async def llm_proxy_models(
+        request: Request,
+        s: AppState = Depends(get_state),
+    ):
+        return await proxy_models(request, s.config)
+
+    @app.post("/v1/chat/completions")
+    @app.post("/chat/completions")
+    async def llm_proxy_chat_completions(
+        request: Request,
+        s: AppState = Depends(get_state),
+    ):
+        return await proxy_chat_completions(request, s.config, s.trace_writer)
 
     @app.post("/v1/decisions/tool")
     async def decide_tool(

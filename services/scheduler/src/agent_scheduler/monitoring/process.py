@@ -80,6 +80,13 @@ class ProcessResourceSampler:
         pids = self._read_cgroup_pids(cgroup_path)
         ctx_switches = self._aggregate_context_switches(pids)
         net = self._read_proc_net_dev(scope.root_pid or scope.pid)
+        cgroup_available = (
+            (cpu_usec is not None and cpu_usec > 0)
+            or memory_current is not None
+            or io is not None
+            or bool(pids)
+            or ctx_switches is not None
+        )
         return ResourceSnapshot(
             captured_at=now,
             monotonic_s=mono,
@@ -92,10 +99,7 @@ class ProcessResourceSampler:
             ctx_switches=ctx_switches,
             target_pid=scope.root_pid or scope.pid,
             process_count=len(pids) if pids else None,
-            available=any(
-                value is not None
-                for value in (cpu_usec, memory_current, io, ctx_switches, net)
-            ),
+            available=cgroup_available,
             source="cgroup-v2",
         )
 
