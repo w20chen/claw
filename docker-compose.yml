@@ -1,0 +1,13 @@
+services:
+  scheduler:
+    build:
+      context: ./services/scheduler
+    command: ["python", "-m", "agent_scheduler.main", "--host", "127.0.0.1", "--port", "8765"]
+    environment:
+      AGENT_SCHEDULER_DB_PATH: /data/scheduler.sqlite3
+      AGENT_SCHEDULER_CONFIG: /config/scheduler.example.yaml
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - ./examples:/config:ro
+      - ./data:/data

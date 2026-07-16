@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.ai/schemas/scheduler/model-event.schema.json",
+  "unevaluatedProperties": false,
+  "allOf": [
+    {"$ref": "common.schema.json"},
+    {
+      "type": "object",
+      "required": ["event_type", "call_id", "provider", "model", "duration_ms", "outcome", "context_token_budget"],
+      "properties": {
+        "event_type": {"enum": ["model_call_started", "model_call_ended"]},
+        "call_id": {"type": ["string", "null"]},
+        "provider": {"type": ["string", "null"]},
+        "model": {"type": ["string", "null"]},
+        "duration_ms": {"type": ["integer", "null"], "minimum": 0},
+        "outcome": {"type": ["string", "null"]},
+        "context_token_budget": {"type": ["integer", "null"], "minimum": 0}
+      }
+    }
+  ]
+}

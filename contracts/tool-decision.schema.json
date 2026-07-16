@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.ai/schemas/scheduler/tool-decision.schema.json",
+  "type": "object",
+  "required": ["decision_id", "action", "reason_code", "reason", "policy_name", "policy_version", "lease_id", "prediction", "placement_advice"],
+  "properties": {
+    "decision_id": {"type": "string", "minLength": 1},
+    "action": {"enum": ["allow", "block"]},
+    "reason_code": {"type": "string", "minLength": 1},
+    "reason": {"type": "string"},
+    "policy_name": {"type": "string"},
+    "policy_version": {"type": "string"},
+    "lease_id": {"type": ["string", "null"]},
+    "prediction": {
+      "type": "object",
+      "required": ["duration_p50_ms", "duration_p90_ms", "resource_class", "confidence"],
+      "properties": {
+        "duration_p50_ms": {"type": ["integer", "null"], "minimum": 0},
+        "duration_p90_ms": {"type": ["integer", "null"], "minimum": 0},
+        "resource_class": {"type": "string"},
+        "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    },
+    "placement_advice": {
+      "type": "object",
+      "required": ["cpu_set", "numa_node", "llc_cluster", "advisory"],
+      "properties": {
+        "cpu_set": {"type": ["string", "null"]},
+        "numa_node": {"type": ["integer", "null"], "minimum": 0},
+        "llc_cluster": {"type": ["string", "null"]},
+        "advisory": {"const": true}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,21 @@
+{
+  "decision_id": "decision-1",
+  "action": "allow",
+  "reason_code": "observe_only",
+  "reason": "Observe mode does not block tool execution.",
+  "policy_name": "observe-only",
+  "policy_version": "1",
+  "lease_id": null,
+  "prediction": {
+    "duration_p50_ms": null,
+    "duration_p90_ms": null,
+    "resource_class": "unknown",
+    "confidence": null
+  },
+  "placement_advice": {
+    "cpu_set": null,
+    "numa_node": null,
+    "llc_cluster": null,
+    "advisory": true
+  }
+}

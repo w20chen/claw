@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.ai/schemas/scheduler/hardware-topology.schema.json",
+  "type": "object",
+  "required": ["available", "platform", "cpu_count", "online_cpus", "numa_nodes", "llc_clusters"],
+  "properties": {
+    "available": {"type": "boolean"},
+    "platform": {"type": "string"},
+    "cpu_count": {"type": ["integer", "null"], "minimum": 0},
+    "online_cpus": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+    "numa_nodes": {"type": "array", "items": {"type": "object"}},
+    "llc_clusters": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": true
+}

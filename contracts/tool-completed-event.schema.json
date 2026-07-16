@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.ai/schemas/scheduler/tool-completed-event.schema.json",
+  "unevaluatedProperties": false,
+  "allOf": [
+    {"$ref": "common.schema.json"},
+    {
+      "type": "object",
+      "required": ["tool_call_id", "decision_id", "lease_id", "tool_name", "duration_ms", "succeeded", "error_type", "error_digest", "result_size_bytes"],
+      "properties": {
+        "tool_call_id": {"type": ["string", "null"]},
+        "decision_id": {"type": ["string", "null"]},
+        "lease_id": {"type": ["string", "null"]},
+        "tool_name": {"type": "string", "minLength": 1},
+        "duration_ms": {"type": "integer", "minimum": 0},
+        "succeeded": {"type": "boolean"},
+        "error_type": {"type": ["string", "null"]},
+        "error_digest": {"type": ["string", "null"]},
+        "result_size_bytes": {"type": ["integer", "null"], "minimum": 0}
+      }
+    }
+  ]
+}

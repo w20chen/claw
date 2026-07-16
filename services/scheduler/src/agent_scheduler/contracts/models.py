@@ -1,0 +1,101 @@
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+SCHEMA_VERSION = "scheduler.v1"
+
+
+class CommonEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["scheduler.v1"]
+    event_id: str
+    occurred_at: str
+    plugin_version: str
+    run_id: str | None
+    session_id: str | None
+    session_key: str | None
+    agent_id: str | None
+
+
+class ParamFeatures(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    serialized_size_bytes: int = Field(ge=0)
+    string_length: int = Field(ge=0)
+    list_item_count: int = Field(ge=0)
+    path_count: int = Field(ge=0)
+    has_command_like_field: bool
+
+
+class ToolBeforeRequest(CommonEvent):
+    tool_call_id: str | None
+    tool_name: str
+    tool_kind: str | None
+    tool_input_kind: str | None
+    derived_paths: list[str]
+    params_digest: str
+    param_features: ParamFeatures
+    raw_params: Any | None = None
+
+
+class ToolPrediction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    duration_p50_ms: int | None = Field(default=None, ge=0)
+    duration_p90_ms: int | None = Field(default=None, ge=0)
+    resource_class: str = "unknown"
+    confidence: float | None = Field(default=None, ge=0, le=1)
+
+
+class PlacementAdvice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cpu_set: str | None = None
+    numa_node: int | None = Field(default=None, ge=0)
+    llc_cluster: str | None = None
+    advisory: Literal[True] = True
+
+
+class ToolDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision_id: str
+    action: Literal["allow", "block"]
+    reason_code: str
+    reason: str
+    policy_name: str
+    policy_version: str
+    lease_id: str | None
+    prediction: ToolPrediction
+    placement_advice: PlacementAdvice
+
+
+class ToolCompletedEvent(CommonEvent):
+    tool_call_id: str | None
+    decision_id: str | None
+    lease_id: str | None
+    tool_name: str
+    duration_ms: int = Field(ge=0)
+    succeeded: bool
+    error_type: str | None
+    error_digest: str | None
+    result_size_bytes: int | None = Field(default=None, ge=0)
+
+
+class ModelEvent(CommonEvent):
+    event_type: Literal["model_call_started", "model_call_ended"]
+    call_id: str | None
+    provider: str | None
+    model: str | None
+    duration_ms: int | None = Field(default=None, ge=0)
+    outcome: str | None
+    context_token_budget: int | None = Field(default=None, ge=0)
+
+
+class StatusResponse(BaseModel):
+    ready: bool
+    policy: str
+    topology: dict[str, Any]

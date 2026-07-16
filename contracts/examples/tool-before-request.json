@@ -1,0 +1,24 @@
+{
+  "schema_version": "scheduler.v1",
+  "event_id": "evt-1",
+  "occurred_at": "2026-07-16T03:23:00Z",
+  "plugin_version": "0.1.0",
+  "run_id": null,
+  "session_id": null,
+  "session_key": null,
+  "agent_id": null,
+  "tool_call_id": "call-1",
+  "tool_name": "exec",
+  "tool_kind": "shell",
+  "tool_input_kind": "json",
+  "derived_paths": [],
+  "params_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "param_features": {
+    "serialized_size_bytes": 42,
+    "string_length": 12,
+    "list_item_count": 0,
+    "path_count": 0,
+    "has_command_like_field": true
+  },
+  "raw_params": null
+}

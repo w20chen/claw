@@ -1,0 +1,19 @@
+{
+  "schema_version": "scheduler.v1",
+  "event_id": "evt-2",
+  "occurred_at": "2026-07-16T03:23:01Z",
+  "plugin_version": "0.1.0",
+  "run_id": null,
+  "session_id": null,
+  "session_key": null,
+  "agent_id": null,
+  "tool_call_id": "call-1",
+  "decision_id": "decision-1",
+  "lease_id": null,
+  "tool_name": "exec",
+  "duration_ms": 1000,
+  "succeeded": true,
+  "error_type": null,
+  "error_digest": null,
+  "result_size_bytes": null
+}

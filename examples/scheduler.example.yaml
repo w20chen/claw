@@ -1,0 +1,8 @@
+bind: 127.0.0.1
+port: 8765
+policy: observe-only
+max_global_concurrency: 4
+lease_ttl_ms: 300000
+admission_wait_ms: 5000
+db_path: ./data/scheduler.sqlite3
+tool_profiles_path: ./examples/tool-profiles.example.json

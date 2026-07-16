@@ -1,0 +1,17 @@
+{
+  "schema_version": "scheduler.v1",
+  "event_id": "evt-3",
+  "occurred_at": "2026-07-16T03:23:02Z",
+  "plugin_version": "0.1.0",
+  "run_id": null,
+  "session_id": null,
+  "session_key": null,
+  "agent_id": null,
+  "event_type": "model_call_ended",
+  "call_id": "model-1",
+  "provider": "openai",
+  "model": "gpt-example",
+  "duration_ms": 500,
+  "outcome": "success",
+  "context_token_budget": null
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.ai/schemas/scheduler/tool-before-request.schema.json",
+  "unevaluatedProperties": false,
+  "allOf": [
+    {"$ref": "common.schema.json"},
+    {
+      "type": "object",
+      "required": ["tool_call_id", "tool_name", "tool_kind", "tool_input_kind", "derived_paths", "params_digest", "param_features", "raw_params"],
+      "properties": {
+        "tool_call_id": {"type": ["string", "null"]},
+        "tool_name": {"type": "string", "minLength": 1},
+        "tool_kind": {"type": ["string", "null"]},
+        "tool_input_kind": {"type": ["string", "null"]},
+        "derived_paths": {"type": "array", "items": {"type": "string"}},
+        "params_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "param_features": {
+          "type": "object",
+          "required": ["serialized_size_bytes", "string_length", "list_item_count", "path_count", "has_command_like_field"],
+          "properties": {
+            "serialized_size_bytes": {"type": "integer", "minimum": 0},
+            "string_length": {"type": "integer", "minimum": 0},
+            "list_item_count": {"type": "integer", "minimum": 0},
+            "path_count": {"type": "integer", "minimum": 0},
+            "has_command_like_field": {"type": "boolean"}
+          },
+          "additionalProperties": false
+        },
+        "raw_params": {}
+      }
+    }
+  ]
+}

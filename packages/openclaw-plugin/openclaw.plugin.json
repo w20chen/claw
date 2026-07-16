@@ -1,0 +1,24 @@
+{
+  "id": "hardware-scheduler",
+  "name": "Hardware Scheduler",
+  "version": "0.1.0",
+  "description": "Hardware-aware tool scheduling bridge for OpenClaw.",
+  "entry": "./dist/index.js",
+  "runtime": "node",
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "endpoint": {"type": "string", "default": "http://127.0.0.1:8765"},
+        "mode": {"enum": ["observe", "enforce"], "default": "observe"},
+        "decisionTimeoutMs": {"type": "integer", "default": 800, "minimum": 1},
+        "reportTimeoutMs": {"type": "integer", "default": 800, "minimum": 1},
+        "failOpen": {"type": "boolean", "default": true},
+        "sendRawParams": {"type": "boolean", "default": false},
+        "authTokenEnv": {"type": "string", "default": "OPENCLAW_SCHEDULER_TOKEN"},
+        "logLevel": {"enum": ["error", "warn", "info", "debug"], "default": "info"}
+      },
+      "additionalProperties": false
+    }
+  }
+}
