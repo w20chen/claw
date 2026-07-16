@@ -43,6 +43,16 @@ npm install
 The Python dev extra includes the sidecar test dependencies and `jsonschema`
 for contract validation.
 
+If editable install fails with a missing `build_editable` hook, either upgrade
+the packaging tools or install non-editable. The sidecar commands in this guide
+set `PYTHONPATH=src`, so non-editable install is sufficient for local
+development dependencies:
+
+```bash
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install 'services/scheduler[dev]'
+```
+
 ## 3. Build The Plugin
 
 ```bash

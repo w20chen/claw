@@ -10,6 +10,12 @@ make build-plugin
 make test
 ```
 
+If editable install is unavailable in the target Python environment, use:
+
+```bash
+python -m pip install 'services/scheduler[dev]'
+```
+
 Python wheel:
 
 ```bash

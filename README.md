@@ -50,6 +50,12 @@ make test
 make build-plugin
 ```
 
+If your Python packaging backend does not support editable installs, use:
+
+```bash
+python -m pip install 'services/scheduler[dev]'
+```
+
 Start the sidecar directly:
 
 ```bash

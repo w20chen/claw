@@ -8,6 +8,12 @@ export PYTHONPATH=src
 python -m agent_scheduler.main --host 127.0.0.1 --port 8765
 ```
 
+If editable install fails because the backend lacks `build_editable`, use:
+
+```bash
+python -m pip install '.[dev]'
+```
+
 Configuration uses environment variables:
 
 - `AGENT_SCHEDULER_DB_PATH`

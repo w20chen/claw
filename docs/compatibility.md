@@ -45,6 +45,15 @@ openclaw plugins install --link ./packages/openclaw-plugin --force
 openclaw plugins inspect hardware-scheduler --runtime --json
 ```
 
+If `pip install -e 'services/scheduler[dev]'` fails because the build backend
+does not expose `build_editable`, upgrade packaging tools or use the
+non-editable install path:
+
+```bash
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install 'services/scheduler[dev]'
+```
+
 ## OpenClaw SDK
 
 The implementation follows the current public documentation and local
