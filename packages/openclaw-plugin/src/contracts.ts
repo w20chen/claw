@@ -22,11 +22,20 @@ export type CommonEvent = {
   agent_id: string | null;
 };
 
+export type ResourceScope = {
+  pid: number | null;
+  process_start_time: number | null;
+  container_id: string | null;
+  include_children: boolean;
+  source: string | null;
+};
+
 export type ToolBeforeRequest = CommonEvent & {
   tool_call_id: string | null;
   tool_name: string;
   tool_kind: string | null;
   tool_input_kind: string | null;
+  operation_hint: string | null;
   derived_paths: string[];
   params_digest: string;
   param_features: {
@@ -37,6 +46,7 @@ export type ToolBeforeRequest = CommonEvent & {
     has_command_like_field: boolean;
   };
   raw_params: unknown | null;
+  resource_scope: ResourceScope | null;
 };
 
 export type ToolDecision = {
@@ -71,4 +81,5 @@ export type ToolCompletedEvent = CommonEvent & {
   error_type: string | null;
   error_digest: string | null;
   result_size_bytes: number | null;
+  resource_scope: ResourceScope | null;
 };

@@ -56,7 +56,9 @@ risk.
 - [x] Phase 4: Cross-language contract examples and validation script
 - [x] Phase 5: `agent-test-bench` trace importer
 - [x] Phase 6: Packaging/deployment docs and examples
-- [ ] Phase 7: Full independent code review and official runtime inspect
+- [x] Phase 7: Official runtime inspect
+- [x] Phase 8: Real-time tool lifecycle monitoring MVP
+- [ ] Phase 9: Full independent code review
 
 ## Completed Tests
 
@@ -67,6 +69,8 @@ Updated as commands are run:
     examples against local JSON Schemas.
 - Passed: `cd services/scheduler && python -m pytest`
   - 2 tests passed.
+  - Covers tool decision/completion round trip, runtime sample persistence,
+    `/v1/tools/recent`, and monitoring metrics presence.
 - Passed: `$env:PYTHONPATH='services/scheduler/src'; python tools\smoke_test.py`
   - Sidecar live/ready smoke test passed.
 - Passed: `cd packages/openclaw-plugin && npm.cmd test`
@@ -93,6 +97,8 @@ Updated as commands are run:
   - Metrics showed one request, one decision, and one completion.
 - Passed: `python -m pytest tests\test_import_agent_test_bench_trace.py --basetemp .pytest-tmp-root`
   - Validated agent-test-bench trace import and generated profile output.
+- Passed: `python tools\validate_contracts.py`
+  - Re-run after real-time monitoring changes; contract examples still validate.
 - Passed: `cd packages/openclaw-plugin && npm.cmd pack --dry-run --cache .\.npm-cache`
   - Tarball includes `dist/*`, `openclaw.plugin.json`, `README.md`, and
     `package.json`.
@@ -135,3 +141,7 @@ Updated as commands are run:
   declaring runtime compatibility.
 - `placement_advice` is advisory only. Real CPU/NUMA/LLC enforcement requires a
   managed executor, container layer, or OpenClaw execution-layer adapter.
+- Real-time resource measurements now require `resource_scope.pid` for
+  attribution. Calls without PID metadata are recorded as `unattributed`; precise
+  cgroup/container accounting still requires OpenClaw execution-layer metadata
+  or a managed executor.

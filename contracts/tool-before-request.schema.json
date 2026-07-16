@@ -12,6 +12,7 @@
         "tool_name": {"type": "string", "minLength": 1},
         "tool_kind": {"type": ["string", "null"]},
         "tool_input_kind": {"type": ["string", "null"]},
+        "operation_hint": {"type": ["string", "null"]},
         "derived_paths": {"type": "array", "items": {"type": "string"}},
         "params_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
         "param_features": {
@@ -27,6 +28,18 @@
           "additionalProperties": false
         },
         "raw_params": {}
+        ,
+        "resource_scope": {
+          "type": ["object", "null"],
+          "properties": {
+            "pid": {"type": ["integer", "null"], "minimum": 0},
+            "process_start_time": {"type": ["number", "null"], "minimum": 0},
+            "container_id": {"type": ["string", "null"]},
+            "include_children": {"type": "boolean", "default": true},
+            "source": {"type": ["string", "null"]}
+          },
+          "additionalProperties": false
+        }
       }
     }
   ]

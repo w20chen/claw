@@ -42,7 +42,18 @@ def create_app(state: AppState | None = None) -> FastAPI:
 
     @app.get("/metrics", response_class=PlainTextResponse)
     async def metrics(s: AppState = Depends(get_state)) -> str:
-        return s.metrics.render(await s.leases.active_count())
+        return s.metrics.render(
+            await s.leases.active_count(),
+            active_tool_monitors=s.tool_monitor.active_count(),
+        )
+
+    @app.get("/v1/tools/recent")
+    async def recent_tools(
+        limit: int = 20,
+        s: AppState = Depends(get_state),
+        _: None = Depends(auth),
+    ) -> dict[str, object]:
+        return {"samples": s.store.recent_tool_runtime_samples(limit)}
 
     @app.post("/v1/decisions/tool")
     async def decide_tool(
@@ -58,6 +69,8 @@ def create_app(state: AppState | None = None) -> FastAPI:
             request,
             SchedulingContext(prediction=prediction, placement=PlacementAdvice()),
         )
+        if decision.action == "allow":
+            s.tool_monitor.begin(request, prediction.resource_class)
         s.store.save_decision(request.event_id, request.tool_call_id, decision)
         s.metrics.inc("scheduler_tool_decisions_total")
         s.metrics.decision_latencies.append(time.monotonic() - start)
@@ -72,6 +85,9 @@ def create_app(state: AppState | None = None) -> FastAPI:
         inserted = s.store.save_completion(event)
         await s.leases.release(event.lease_id)
         if inserted:
+            sample = s.tool_monitor.complete(event)
+            if s.store.save_tool_runtime_sample(sample):
+                s.metrics.observe_tool_runtime(sample)
             s.metrics.inc("scheduler_tool_completions_total")
             s.metrics.tool_durations.append(event.duration_ms / 1000)
             if s.calibrator.update(event, None):

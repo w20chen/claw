@@ -9,3 +9,6 @@
 - KV cache and GPU serving joint scheduling are not implemented.
 - Observe mode never changes agent behavior.
 - Hook and HTTP timeouts limit admission-control precision.
+- If OpenClaw does not expose a tool PID, resource samples are intentionally
+  marked `unattributed`; only duration, prediction, and command-category
+  telemetry are available for that tool call.

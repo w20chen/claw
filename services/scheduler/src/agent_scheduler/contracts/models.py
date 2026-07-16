@@ -30,15 +30,27 @@ class ParamFeatures(BaseModel):
     has_command_like_field: bool
 
 
+class ResourceScope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pid: int | None = Field(default=None, ge=0)
+    process_start_time: float | None = Field(default=None, ge=0)
+    container_id: str | None = None
+    include_children: bool = True
+    source: str | None = None
+
+
 class ToolBeforeRequest(CommonEvent):
     tool_call_id: str | None
     tool_name: str
     tool_kind: str | None
     tool_input_kind: str | None
+    operation_hint: str | None = None
     derived_paths: list[str]
     params_digest: str
     param_features: ParamFeatures
     raw_params: Any | None = None
+    resource_scope: ResourceScope | None = None
 
 
 class ToolPrediction(BaseModel):
@@ -83,6 +95,7 @@ class ToolCompletedEvent(CommonEvent):
     error_type: str | None
     error_digest: str | None
     result_size_bytes: int | None = Field(default=None, ge=0)
+    resource_scope: ResourceScope | None = None
 
 
 class ModelEvent(CommonEvent):

@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent_scheduler.contracts.models import ToolBeforeRequest, ToolPrediction
+from agent_scheduler.predictors.exec_classifier import (
+    classify_exec_tool_name,
+    extract_exec_operation,
+)
 
 
 @dataclass(frozen=True)
@@ -30,7 +34,7 @@ class StaticProfilePredictor:
 
     async def predict(self, request: ToolBeforeRequest) -> ToolPrediction:
         operation = extract_operation(request)
-        profile = self._match(request.tool_name, operation)
+        profile = self._match(candidate_tool_names(request), operation)
         if profile is None:
             return ToolPrediction(resource_class="unknown")
         confidence = 0.8 if profile.operation else 0.5
@@ -41,13 +45,15 @@ class StaticProfilePredictor:
             confidence=confidence,
         )
 
-    def _match(self, tool_name: str, operation: str | None) -> ToolProfile | None:
-        for profile in self.profiles:
-            if profile.tool_name == tool_name and profile.operation == operation:
-                return profile
-        for profile in self.profiles:
-            if profile.tool_name == tool_name and profile.operation is None:
-                return profile
+    def _match(self, tool_names: list[str], operation: str | None) -> ToolProfile | None:
+        for tool_name in tool_names:
+            for profile in self.profiles:
+                if profile.tool_name == tool_name and profile.operation == operation:
+                    return profile
+        for tool_name in tool_names:
+            for profile in self.profiles:
+                if profile.tool_name == tool_name and profile.operation is None:
+                    return profile
         for profile in self.profiles:
             if profile.tool_name == "*" and profile.operation is None:
                 return profile
@@ -55,9 +61,14 @@ class StaticProfilePredictor:
 
 
 def extract_operation(request: ToolBeforeRequest) -> str | None:
-    raw = request.raw_params
-    if isinstance(raw, dict):
-        value = raw.get("operation") or raw.get("command") or raw.get("cmd")
-        if isinstance(value, str):
-            return value.strip().split()[0] if value.strip() else None
-    return None
+    if request.operation_hint:
+        return request.operation_hint
+    return extract_exec_operation(request.tool_name, request.raw_params)
+
+
+def candidate_tool_names(request: ToolBeforeRequest) -> list[str]:
+    names = [request.tool_name]
+    classified = classify_exec_tool_name(request.tool_name, request.raw_params)
+    if classified not in names:
+        names.insert(0, classified)
+    return names

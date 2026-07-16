@@ -12,6 +12,10 @@ Implemented:
 - FastAPI sidecar with health, status, decision, completion, model-event, and
   Prometheus-text metrics endpoints.
 - SQLite persistence with idempotent event writes.
+- Real-time tool lifecycle monitoring with per-tool runtime samples, recent
+  sample inspection, privacy-preserving `operation_hint` classification, and
+  PID-attributed CPU/RSS/IO/context-switch metrics when OpenClaw provides a
+  `resource_scope`.
 - Observe-only and bounded concurrency policies.
 - Static profile predictor, EWMA calibration, Linux topology inventory.
 - TypeScript OpenClaw plugin source with redaction, timeout-aware HTTP client,
@@ -22,9 +26,9 @@ Not implemented in this MVP:
 
 - Managed executor or actual CPU/NUMA affinity enforcement.
 - KV cache migration or GPU serving coordination.
-- End-to-end OpenClaw Gateway runtime verification on this machine. The local
-  `openclaw --version` command resolves to the research harness CLI, not the
-  official plugin-management CLI.
+- Managed per-tool subprocess or cgroup enforcement. If OpenClaw does not
+  provide a PID/process scope, samples are marked `unattributed` rather than
+  pretending sidecar process metrics belong to the tool.
 
 ## Quick Start
 
@@ -66,6 +70,7 @@ OpenClaw Gateway
   -> localhost HTTP/JSON
   -> Python scheduler sidecar
      -> SQLite events
+     -> realtime tool runtime samples
      -> static prediction + calibration
      -> admission policy
      -> topology inventory
@@ -92,5 +97,11 @@ mirror those schemas, and tests validate examples across both sides.
 
 The existing `C:\Users\29068\Desktop\agent-test-bench` repository remains a
 research and evaluation source. This project reads exported canonical
-`trace.jsonl` files but does not import its AgentLoop, benchmark runner, or
-agent scaffold into the online plugin runtime.
+`trace.jsonl` files and can generate scheduler tool profiles from `tool_exec`
+spans, but does not import its AgentLoop, benchmark runner, or agent scaffold
+into the online plugin runtime.
+
+At runtime, the OpenClaw plugin sends tool start/completion events to the
+sidecar. The sidecar stores correlated runtime samples in SQLite and exposes the
+latest samples at `GET /v1/tools/recent`; Prometheus metrics are exposed at
+`GET /metrics`.

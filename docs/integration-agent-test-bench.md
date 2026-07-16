@@ -12,6 +12,9 @@ Relevant findings:
 - The benchmark repository has resource measurement and replay machinery under
   `src/trace_collect` and `src/harness`, but those modules are not online
   runtime dependencies for this project.
+- Online plugin runtime now performs lightweight real-time monitoring from
+  OpenClaw tool lifecycle events. This is intentionally smaller than the full
+  benchmark profiler stack.
 
 Importer:
 
@@ -35,11 +38,13 @@ Canonical `trace.jsonl` | Imported with `tools/import_agent_test_bench_trace.py`
 OpenClaw `tool_exec` actions | Converted to `ToolCompletedEvent` and profile samples.
 Classified exec names such as `exec-pytest` | `exec-*` suffix becomes profile `operation`.
 Trace simulate / replay | Remains offline in agent-test-bench; scheduler consumes exported traces/profiles only.
-Resource monitoring samples | Remain research artifacts for now; resource-derived classes can be folded into generated profiles later.
+Resource monitoring samples | Online sidecar now follows the same attribution rule: sample the target PID/process tree when available, otherwise mark the sample `unattributed`.
 VTune / ksys per-tool profiling | Remains offline; scheduler should consume summarized profile exports, not launch profilers.
 HTML visualization | Remains in agent-test-bench.
 Benchmark/container orchestration | Remains in agent-test-bench and is not imported by the online sidecar.
 Agent scaffold / AgentLoop | Not imported. OpenClaw native hooks are the online integration point.
+Real-time OpenClaw tool monitoring | Implemented in the scheduler sidecar via `/v1/decisions/tool`, `/v1/events/tool-completed`, `/v1/tools/recent`, and Prometheus metrics.
+`exec` command classification | Ported into the scheduler as privacy-preserving `operation_hint` / `operation` matching so `exec` + `python -m pytest` can reuse `exec-pytest` profiles.
 
 ## Development Contract
 
@@ -52,6 +57,14 @@ The online sidecar should never import benchmark runners, container managers,
 AgentLoop classes, or visualization modules. That keeps production plugin
 behavior small, deterministic, and privacy-preserving while still letting the
 research repository feed it real workload measurements.
+
+The boundary is:
+
+- agent-test-bench produces offline traces, profile summaries, and richer
+  profiler-derived labels.
+- The OpenClaw plugin produces online lifecycle events.
+- The scheduler sidecar joins online lifecycle events with local predictions,
+  stores live runtime samples, and exposes operational metrics.
 
 Suggested future profile export contract:
 

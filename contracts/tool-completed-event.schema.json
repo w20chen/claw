@@ -16,7 +16,18 @@
         "succeeded": {"type": "boolean"},
         "error_type": {"type": ["string", "null"]},
         "error_digest": {"type": ["string", "null"]},
-        "result_size_bytes": {"type": ["integer", "null"], "minimum": 0}
+        "result_size_bytes": {"type": ["integer", "null"], "minimum": 0},
+        "resource_scope": {
+          "type": ["object", "null"],
+          "properties": {
+            "pid": {"type": ["integer", "null"], "minimum": 0},
+            "process_start_time": {"type": ["number", "null"], "minimum": 0},
+            "container_id": {"type": ["string", "null"]},
+            "include_children": {"type": "boolean", "default": true},
+            "source": {"type": ["string", "null"]}
+          },
+          "additionalProperties": false
+        }
       }
     }
   ]

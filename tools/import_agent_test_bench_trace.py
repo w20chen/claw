@@ -3,10 +3,18 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+ROOT = Path(__file__).resolve().parents[1]
+SCHEDULER_SRC = ROOT / "services" / "scheduler" / "src"
+if str(SCHEDULER_SRC) not in sys.path:
+    sys.path.insert(0, str(SCHEDULER_SRC))
+
+from agent_scheduler.predictors.exec_classifier import extract_exec_operation  # noqa: E402
 
 
 def main() -> None:
@@ -100,18 +108,14 @@ def infer_operation(record: dict[str, Any]) -> str | None:
     if not isinstance(data, dict):
         return None
     tool_name = data.get("tool_name")
-    if isinstance(tool_name, str) and "-" in tool_name:
+    if not isinstance(tool_name, str):
+        return None
+    if "-" in tool_name:
         base, operation = tool_name.split("-", 1)
         if base == "exec" and operation:
             return operation
     tool_args = data.get("tool_args")
-    if isinstance(tool_args, str):
-        stripped = tool_args.strip()
-        if not stripped:
-            return None
-        first = stripped.split(maxsplit=1)[0]
-        return first[:64]
-    return None
+    return extract_exec_operation(tool_name, tool_args)
 
 
 def build_profiles(samples: dict[tuple[str, str | None], list[int]]) -> dict[str, Any]:
