@@ -17,11 +17,41 @@ Importer:
 
 ```bash
 python tools/import_agent_test_bench_trace.py input-trace.jsonl output-events.jsonl --dry-run
+python tools/import_agent_test_bench_trace.py input-trace.jsonl output-events.jsonl \
+  --profiles-out tool-profiles.generated.json
 ```
 
 The importer maps canonical tool execution spans into offline
-`ToolCompletedEvent` records when duration information is available. Fields
-that cannot be mapped are reported in the import statistics.
+`ToolCompletedEvent` records when duration information is available. It can
+also aggregate observed `tool_exec` durations into scheduler-compatible static
+tool profiles.
+
+## Feature Mapping
+
+agent-test-bench capability | Scheduler integration
+---|---
+Canonical `trace.jsonl` | Imported with `tools/import_agent_test_bench_trace.py`.
+`trace_format_version: 5` metadata | Read to preserve `run_id` when available.
+OpenClaw `tool_exec` actions | Converted to `ToolCompletedEvent` and profile samples.
+Classified exec names such as `exec-pytest` | `exec-*` suffix becomes profile `operation`.
+Trace simulate / replay | Remains offline in agent-test-bench; scheduler consumes exported traces/profiles only.
+Resource monitoring samples | Remain research artifacts for now; resource-derived classes can be folded into generated profiles later.
+VTune / ksys per-tool profiling | Remains offline; scheduler should consume summarized profile exports, not launch profilers.
+HTML visualization | Remains in agent-test-bench.
+Benchmark/container orchestration | Remains in agent-test-bench and is not imported by the online sidecar.
+Agent scaffold / AgentLoop | Not imported. OpenClaw native hooks are the online integration point.
+
+## Development Contract
+
+For future agent-test-bench work, prefer exporting one or both of:
+
+1. Canonical `trace.jsonl` files with `tool_exec` actions and timestamps.
+2. Scheduler profile files matching `contracts/tool-profile.schema.json`.
+
+The online sidecar should never import benchmark runners, container managers,
+AgentLoop classes, or visualization modules. That keeps production plugin
+behavior small, deterministic, and privacy-preserving while still letting the
+research repository feed it real workload measurements.
 
 Suggested future profile export contract:
 

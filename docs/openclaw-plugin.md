@@ -2,6 +2,15 @@
 
 The plugin package is `packages/openclaw-plugin`.
 
+It is linked into the local OpenClaw installation:
+
+```powershell
+openclaw.cmd plugins install --link C:\Users\29068\Desktop\claw\packages\openclaw-plugin
+openclaw.cmd plugins inspect hardware-scheduler --runtime --json
+```
+
+The verified local runtime reports `hookCount: 4`.
+
 It registers:
 
 - `before_tool_call`

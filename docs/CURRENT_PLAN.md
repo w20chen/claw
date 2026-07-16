@@ -6,9 +6,11 @@
 - `node --version`: `v24.18.0`
 - `npm.cmd --version`: `11.16.0`
 - `npm --version` in PowerShell: blocked by script execution policy
-- `openclaw --version`: not supported by the local command; it resolves to
-  `python -m agents.openclaw` from `agent-test-bench` and exits with
-  `unrecognized arguments: --version`
+- Official OpenClaw installed with `npm.cmd install -g openclaw@latest`
+- Official OpenClaw CLI: `OpenClaw 2026.7.1 (2d2ddc4)`
+- Use `C:\Users\29068\AppData\Roaming\npm\openclaw.cmd` from PowerShell.
+  The bare `openclaw` command can still hit PowerShell's blocked `.ps1` shim
+  unless script execution policy is explicitly changed by the user.
 - Python: `3.12.4`
 - FastAPI/Pydantic: FastAPI `0.128.0`, Pydantic `2.12.5`
 - Missing local development tools observed so far: `tsc`, `aiosqlite`, `ruff`,
@@ -71,6 +73,26 @@ Updated as commands are run:
   - 2 Node tests passed.
 - Passed: `cd packages/openclaw-plugin && npm.cmd run typecheck`
 - Passed: `cd packages/openclaw-plugin && npm.cmd run build`
+- Passed: `C:\Users\29068\AppData\Roaming\npm\openclaw.cmd plugins install --link C:\Users\29068\Desktop\claw\packages\openclaw-plugin`
+  - Linked local plugin path into OpenClaw.
+- Passed: `C:\Users\29068\AppData\Roaming\npm\openclaw.cmd plugins inspect hardware-scheduler --runtime --json`
+  - `status: loaded`
+  - `hookCount: 4`
+  - `typedHooks`: `before_tool_call`, `after_tool_call`, `model_call_started`,
+    `model_call_ended`
+  - Compatibility note: hook-only plugin shape, supported compatibility path.
+- Passed: short-lived Gateway start check with
+  `openclaw.cmd gateway run --allow-unconfigured --auth none --bind loopback --port 18789 --force --verbose`
+  - Gateway started and loaded gateway-facing plugins.
+  - Gateway startup log does not list hook-only agent-runtime plugins; use
+    runtime inspect for hook registration proof.
+- Passed: sidecar in-process HTTP check
+  - `/health/ready` returned ready.
+  - `POST /v1/decisions/tool` returned `allow` with `policy_name=observe-only`.
+  - `POST /v1/events/tool-completed` returned `stored=true`.
+  - Metrics showed one request, one decision, and one completion.
+- Passed: `python -m pytest tests\test_import_agent_test_bench_trace.py --basetemp .pytest-tmp-root`
+  - Validated agent-test-bench trace import and generated profile output.
 - Passed: `cd packages/openclaw-plugin && npm.cmd pack --dry-run --cache .\.npm-cache`
   - Tarball includes `dist/*`, `openclaw.plugin.json`, `README.md`, and
     `package.json`.
@@ -83,21 +105,28 @@ Updated as commands are run:
   - Reason: `No module named ruff`
 - Failed as expected in this environment: `python -m mypy .`
   - Reason: `No module named mypy`
-- Failed as expected in this environment:
-  `openclaw plugins inspect hardware-scheduler --runtime --json`
-  - Reason: local `openclaw` resolves to `python -m agents.openclaw` and does
-    not support plugin-management subcommands.
+- Passed: `C:\Users\29068\AppData\Roaming\npm\openclaw.cmd --version`
+  - Output: `OpenClaw 2026.7.1 (2d2ddc4)`
+- Passed: `C:\Users\29068\AppData\Roaming\npm\openclaw.cmd plugins list`
+  - Confirmed official plugin CLI is installed and stock plugin registry loads.
 
 ## Issues
 
-- Local `openclaw` is not the official plugin CLI.
+- A Python `openclaw.exe` from `Python312\Scripts` still exists and can shadow
+  the official CLI depending on shell resolution. The user PATH was updated to
+  put `C:\Users\29068\AppData\Roaming\npm` first for new processes, but
+  PowerShell may still prefer the npm `openclaw.ps1` shim and block it under the
+  current execution policy. Use `openclaw.cmd` for now.
 - TypeScript compiler is installed locally under `packages/openclaw-plugin`
   after `npm.cmd install`.
 - Python `ruff` and `mypy` are not installed in the current global environment.
 - Isolated `python -m build` failed due a user Temp/encoding issue; the
   non-isolated build succeeded.
 - Official OpenClaw SDK package import path must be revalidated once the SDK is
-  installed.
+  installed. Current verified import path for this local OpenClaw is
+  `openclaw/plugin-sdk/plugin-entry`.
+- Full live agent-turn validation is blocked by model auth:
+  `openclaw models status` reports default `openai/gpt-5.5` auth missing.
 
 ## Unresolved Risks
 

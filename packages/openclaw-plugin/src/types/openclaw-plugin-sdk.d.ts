@@ -1,7 +1,10 @@
-declare module "@openclaw/plugin-sdk" {
+declare module "openclaw/plugin-sdk/plugin-entry" {
+  type JsonSchema = Record<string, unknown>;
+
   export type HookApi = {
-    on(name: string, handler: (event: unknown, context?: unknown) => unknown | Promise<unknown>): void;
-    getConfig?(): unknown;
+    id: string;
+    pluginConfig?: Record<string, unknown>;
+    on(name: string | string[], handler: (event: unknown, context?: unknown) => unknown | Promise<unknown>, opts?: {priority?: number; timeoutMs?: number}): void;
     logger?: {
       error(message: string, data?: unknown): void;
       warn(message: string, data?: unknown): void;
@@ -10,5 +13,11 @@ declare module "@openclaw/plugin-sdk" {
     };
   };
 
-  export function definePluginEntry(factory: (api: HookApi) => void | Promise<void>): unknown;
+  export function definePluginEntry(options: {
+    id: string;
+    name: string;
+    description: string;
+    configSchema?: JsonSchema;
+    register(api: HookApi): void;
+  }): unknown;
 }

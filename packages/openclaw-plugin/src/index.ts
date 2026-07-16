@@ -1,4 +1,4 @@
-import {definePluginEntry, type HookApi} from "@openclaw/plugin-sdk";
+import {definePluginEntry, type HookApi} from "openclaw/plugin-sdk/plugin-entry";
 import {randomUUID} from "node:crypto";
 import {SidecarClient} from "./client.js";
 import {loadConfig, isRecord} from "./config.js";
@@ -9,22 +9,40 @@ import {paramFeatures, redact, stableDigest} from "./redaction.js";
 
 const pluginVersion = "0.1.0";
 
-export default definePluginEntry((api: HookApi) => {
-  const config = loadConfig(api.getConfig ? api.getConfig() : {});
+export default definePluginEntry({
+  id: "hardware-scheduler",
+  name: "Hardware Scheduler",
+  description: "Hardware-aware tool scheduling bridge for OpenClaw.",
+  configSchema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      endpoint: {type: "string", default: "http://127.0.0.1:8765"},
+      mode: {enum: ["observe", "enforce"], default: "observe"},
+      decisionTimeoutMs: {type: "integer", default: 800, minimum: 1},
+      reportTimeoutMs: {type: "integer", default: 800, minimum: 1},
+      failOpen: {type: "boolean", default: true},
+      sendRawParams: {type: "boolean", default: false},
+      authTokenEnv: {type: "string", default: "OPENCLAW_SCHEDULER_TOKEN"},
+      logLevel: {enum: ["error", "warn", "info", "debug"], default: "info"}
+    }
+  },
+  register(api: HookApi): void {
+  const config = loadConfig(api.pluginConfig ?? {});
   const logger = api.logger ?? consoleLogger;
   const client = new SidecarClient(config);
   const correlation = new CorrelationMap(300_000, 10_000);
 
-  api.on("before_tool_call", async (event: unknown) => {
+  api.on("before_tool_call", async (event: unknown, context: unknown) => {
     const payload = buildToolBefore(event, config.sendRawParams);
+    mergeContext(payload, context);
     try {
       const decision = await client.decide(payload);
       correlation.set(payload.tool_call_id, decision.decision_id, decision.lease_id);
       if (config.mode === "enforce" && decision.action === "block") {
         return {
-          action: "block",
-          blockReason: decision.reason,
-          reasonCode: decision.reason_code
+          block: true,
+          blockReason: decision.reason
         };
       }
       return undefined;
@@ -39,8 +57,9 @@ export default definePluginEntry((api: HookApi) => {
     }
   });
 
-  api.on("after_tool_call", async (event: unknown) => {
+  api.on("after_tool_call", async (event: unknown, context: unknown) => {
     const completion = buildCompletion(event, correlation.take(extractString(event, ["tool_call_id", "toolCallId", "id"])));
+    mergeContext(completion, context);
     try {
       await client.reportCompletion(completion);
     } catch (error) {
@@ -48,13 +67,14 @@ export default definePluginEntry((api: HookApi) => {
     }
   });
 
-  api.on("model_call_started", async (event: unknown) => {
+  api.on("model_call_started", async (event: unknown, context: unknown) => {
     await reportModel(client, logger, event, "model_call_started");
   });
 
-  api.on("model_call_ended", async (event: unknown) => {
+  api.on("model_call_ended", async (event: unknown, context: unknown) => {
     await reportModel(client, logger, event, "model_call_ended");
   });
+}
 });
 
 function common(event: unknown): CommonEvent {
@@ -84,6 +104,13 @@ function buildToolBefore(event: unknown, sendRawParams: boolean): ToolBeforeRequ
     param_features: paramFeatures(safeParams),
     raw_params: sendRawParams ? safeParams : null
   };
+}
+
+function mergeContext(payload: CommonEvent, context: unknown): void {
+  payload.run_id = payload.run_id ?? extractString(context, ["runId", "run_id"]);
+  payload.session_id = payload.session_id ?? extractString(context, ["sessionId", "session_id"]);
+  payload.session_key = payload.session_key ?? extractString(context, ["sessionKey", "session_key"]);
+  payload.agent_id = payload.agent_id ?? extractString(context, ["agentId", "agent_id"]);
 }
 
 function buildCompletion(

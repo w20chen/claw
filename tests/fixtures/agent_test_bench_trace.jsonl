@@ -1,0 +1,2 @@
+{"type":"trace_metadata","trace_format_version":5,"run_id":"bench_run_1","scaffold":"openclaw"}
+{"action_type":"tool_exec","agent_id":"agent-1","action_id":"exec-1","ts_start":10.0,"ts_end":11.5,"data":{"tool_name":"exec-pytest","tool_args":"pytest tests/test_example.py"}}
