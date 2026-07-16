@@ -83,10 +83,8 @@ export async function instrumentExecParams(
     params.command = [
       shellQuote(config.launcherPath),
       "run",
-      "--execution-id",
-      shellQuote(executionId),
-      "--token",
-      shellQuote(token)
+      `--execution-id=${shellQuote(executionId)}`,
+      `--token=${shellQuote(token)}`
     ].join(" ");
   }
 

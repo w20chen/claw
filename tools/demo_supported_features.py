@@ -146,8 +146,8 @@ def execution_demo(
         print("launcher not run. To claim this spec manually:")
         print(
             "  python -m agent_scheduler.launcher run "
-            f"--endpoint {endpoint} --execution-id {execution_id} "
-            f"--token {registration['one_time_token']}"
+            f"--endpoint {endpoint} --execution-id={execution_id} "
+            f"--token={registration['one_time_token']}"
         )
         return
 
@@ -162,10 +162,8 @@ def execution_demo(
             "run",
             "--endpoint",
             endpoint,
-            "--execution-id",
-            execution_id,
-            "--token",
-            str(registration["one_time_token"]),
+            f"--execution-id={execution_id}",
+            f"--token={registration['one_time_token']}",
         ],
         cwd=str(ROOT),
         env=env,

@@ -98,7 +98,7 @@ test("marker backend injects env without changing command", async () => {
 test("managed-wrapper rewrites command to launcher token only", async () => {
   const client = {
     async registerExecution() {
-      return {one_time_token: "token-1"};
+      return {one_time_token: "-token-1"};
     }
   };
   const event = {toolName: "exec", toolCallId: "call-1", params: {command: "echo raw-command"}};
@@ -112,7 +112,7 @@ test("managed-wrapper rewrites command to launcher token only", async () => {
     {...baseConfig, executionBackend: "managed-wrapper", securityBoundaryAccepted: true}
   );
 
-  assert.equal(result.params.command, "'/opt/claw/bin/claw-launch' run --execution-id 'call-1' --token 'token-1'");
+  assert.equal(result.params.command, "'/opt/claw/bin/claw-launch' run --execution-id='call-1' --token='-token-1'");
   assert.equal(result.params.command.includes("raw-command"), false);
   assert.equal(result.params.env.CLAW_EXECUTION_ID, "call-1");
 });

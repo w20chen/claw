@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from agent_scheduler import launcher
 
 
@@ -140,3 +142,37 @@ def test_launcher_passes_placement_to_spawn(monkeypatch, tmp_path) -> None:
 
     assert launcher.run_execution("http://sidecar", "exec-1", "token-1") == 7
     assert posts[1][1]["cgroup_path"] == str(tmp_path / "exec-1")
+
+
+def test_launcher_accepts_dash_prefixed_token_with_equals(monkeypatch) -> None:
+    seen: dict[str, str] = {}
+
+    def fake_run(endpoint: str, execution_id: str, token: str) -> int:
+        seen["endpoint"] = endpoint
+        seen["execution_id"] = execution_id
+        seen["token"] = token
+        return 0
+
+    monkeypatch.setattr(launcher, "run_execution", fake_run)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "claw-launch",
+            "run",
+            "--endpoint",
+            "http://sidecar",
+            "--execution-id",
+            "exec-1",
+            "--token=-leading-token",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        launcher.main()
+
+    assert exc.value.code == 0
+    assert seen == {
+        "endpoint": "http://sidecar",
+        "execution_id": "exec-1",
+        "token": "-leading-token",
+    }

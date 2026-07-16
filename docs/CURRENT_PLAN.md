@@ -32,6 +32,31 @@
 - Passed: `cd services/scheduler && pytest tests -q`
   - 18 tests passed.
 
+## 2026-07-17 Launcher Token Argument Fix
+
+- Reproduced from Linux demo output: sidecar one-time tokens can start with
+  `-`, and `argparse` treats `--token <value>` as missing when `<value>` looks
+  like another option.
+- Fixed wrapper command generation to use equals-form arguments:
+  - `--execution-id=<id>`
+  - `--token=<token>`
+- Fixed `tools/demo_supported_features.py --run-launcher` to use the same
+  equals-form arguments.
+- Added launcher argparse coverage for dash-prefixed tokens.
+
+### Validation
+
+- Passed: `cd packages/openclaw-plugin && npm.cmd test`
+  - 4 Node tests passed.
+- Passed: `cd services/scheduler && pytest tests\test_launcher.py -q`
+  - 5 tests passed.
+- Passed: `cd services/scheduler && pytest tests -q`
+  - 19 tests passed.
+- Passed: `python tools\validate_contracts.py`
+- Passed: `cd packages/openclaw-plugin && npm.cmd run typecheck`
+- Passed: `pytest tests -q --basetemp .pytest-tmp-root`
+  - 3 tests passed.
+
 ## 2026-07-16 Reference Launcher And Execution Lifecycle
 
 - Used `agent-test-bench` as a read-only reference source:
