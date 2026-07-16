@@ -87,7 +87,9 @@ openclaw plugins inspect hardware-scheduler --runtime --json
 Configure the plugin for real raw trace recording:
 
 ```bash
-cat <<'JSON5' | openclaw config patch --stdin
+export CLAW_LAUNCHER_PATH="$(python -c 'import shutil; p=shutil.which("claw-launch"); assert p, "claw-launch not found"; print(p)')"
+
+cat <<JSON5 | openclaw config patch --stdin
 {
   plugins: {
     entries: {
@@ -99,7 +101,7 @@ cat <<'JSON5' | openclaw config patch --stdin
           failOpen: true,
           recordRawTrace: true,
           executionBackend: "managed-wrapper",
-          launcherPath: "claw-launch",
+          launcherPath: "$CLAW_LAUNCHER_PATH",
           securityBoundaryAccepted: true
         }
       }
@@ -115,7 +117,7 @@ Run a real OpenClaw task and inspect outputs:
 export OPENCLAW_HARDWARE_SCHEDULER_ENDPOINT=http://127.0.0.1:8765
 export OPENCLAW_HARDWARE_SCHEDULER_RECORD_RAW_TRACE=true
 export OPENCLAW_HARDWARE_SCHEDULER_EXECUTION_BACKEND=managed-wrapper
-export OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH=claw-launch
+export OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH="$CLAW_LAUNCHER_PATH"
 export OPENCLAW_HARDWARE_SCHEDULER_SECURITY_BOUNDARY_ACCEPTED=true
 
 openclaw models list

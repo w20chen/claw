@@ -67,7 +67,7 @@ export async function instrumentExecParams(
   }
 
   params.env = {
-    ...(isRecord(params.env) ? params.env : {}),
+    ...safeExecEnv(params.env),
     CLAW_EXECUTION_ID: executionId,
     CLAW_TOOL_CALL_ID: payload.tool_call_id ?? "",
     CLAW_RUN_ID: runId ?? "",
@@ -133,6 +133,17 @@ function matchesList(values: string[], candidate: string): boolean {
 function cloneRecord(value: unknown): Record<string, unknown> | null {
   if (!isRecord(value)) return null;
   return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function safeExecEnv(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  const output: Record<string, unknown> = {};
+  const blocked = new Set(["BASH_ENV", "ENV"]);
+  for (const [key, item] of Object.entries(value)) {
+    if (blocked.has(key)) continue;
+    output[key] = item;
+  }
+  return output;
 }
 
 function shellQuote(value: string): string {

@@ -96,6 +96,28 @@ test("marker backend injects env without changing command", async () => {
   assert.equal(seen[0].command, "pytest tests -q");
 });
 
+test("exec instrumentation drops shell startup env override keys", async () => {
+  const client = {
+    async registerExecution() {
+      return {one_time_token: "token-1"};
+    }
+  };
+  const event = {
+    toolName: "exec",
+    toolCallId: "call-1",
+    params: {
+      command: "pytest tests -q",
+      env: {KEEP: "1", BASH_ENV: "/tmp/unsafe", ENV: "/tmp/unsafe"}
+    }
+  };
+
+  const result = await instrumentExecParams(event, {}, payload, decision, client, baseConfig);
+
+  assert.equal(result.params.env.KEEP, "1");
+  assert.equal("BASH_ENV" in result.params.env, false);
+  assert.equal("ENV" in result.params.env, false);
+});
+
 test("managed-wrapper rewrites command to launcher token only", async () => {
   const client = {
     async registerExecution() {

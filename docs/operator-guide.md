@@ -72,12 +72,21 @@ model_call_ended
 
 ## 3. Configure The Plugin For Real Raw Trace Recording
 
-Patch OpenClaw config non-interactively. In OpenClaw `2026.7.1`, plugin
-runtime config lives under `plugins.entries.<plugin-id>.config`, not directly
-under `plugins.<plugin-id>`:
+Find the absolute `claw-launch` path first. Do not rely on `launcherPath:
+"claw-launch"`; OpenClaw's exec environment may have a narrower `PATH` than
+your interactive shell.
 
 ```bash
-cat <<'JSON5' | openclaw config patch --stdin
+export CLAW_LAUNCHER_PATH="$(python -c 'import shutil; p=shutil.which("claw-launch"); assert p, "claw-launch not found"; print(p)')"
+echo "$CLAW_LAUNCHER_PATH"
+```
+
+Patch OpenClaw config non-interactively. In OpenClaw `2026.7.1`, plugin runtime
+config lives under `plugins.entries.<plugin-id>.config`, not directly under
+`plugins.<plugin-id>`:
+
+```bash
+cat <<JSON5 | openclaw config patch --stdin
 {
   plugins: {
     entries: {
@@ -89,7 +98,7 @@ cat <<'JSON5' | openclaw config patch --stdin
           failOpen: true,
           recordRawTrace: true,
           executionBackend: "managed-wrapper",
-          launcherPath: "claw-launch",
+          launcherPath: "$CLAW_LAUNCHER_PATH",
           securityBoundaryAccepted: true
         }
       }
@@ -151,7 +160,7 @@ populated:
 export OPENCLAW_HARDWARE_SCHEDULER_ENDPOINT=http://127.0.0.1:8765
 export OPENCLAW_HARDWARE_SCHEDULER_RECORD_RAW_TRACE=true
 export OPENCLAW_HARDWARE_SCHEDULER_EXECUTION_BACKEND=managed-wrapper
-export OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH=claw-launch
+export OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH="$CLAW_LAUNCHER_PATH"
 export OPENCLAW_HARDWARE_SCHEDULER_SECURITY_BOUNDARY_ACCEPTED=true
 ```
 
@@ -262,8 +271,29 @@ If `trace.jsonl` contains `tool_args: null` or `tool_result: null`:
 If resource usage is `unattributed`:
 
 - Prefer `executionBackend: "managed-wrapper"` for `exec`.
-- Confirm `claw-launch --help` works in the same environment OpenClaw uses.
+- Use an absolute launcher path. Confirm:
+  `python -c 'import shutil; print(shutil.which("claw-launch"))'`.
 - On Linux, optionally set `CLAW_CGROUP_ROOT` before the OpenClaw run.
+
+If OpenClaw reports:
+
+```text
+Security Violation: blocked override keys: BASH_ENV, ENV
+```
+
+rebuild/relink the plugin. Current instrumentation filters those keys before
+returning modified `exec` params.
+
+If OpenClaw reports:
+
+```text
+/bin/bash: line 1: claw-launch: command not found
+```
+
+the launcher path is not absolute or not visible to the exec environment. Set
+`CLAW_LAUNCHER_PATH` and
+`OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH` as shown above, rebuild/relink the
+plugin, and rerun.
 
 If no model can run:
 
