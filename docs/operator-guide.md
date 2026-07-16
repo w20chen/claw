@@ -1,72 +1,32 @@
 # Operator Guide
 
-This guide assumes a Linux host with Bash, Python 3.12, Node.js 24, and npm.
-For a shorter feature-by-feature demo with expected outputs, see
-[`supported-features.md`](supported-features.md).
+This guide is the shortest end-to-end path for running the plugin and sidecar.
+It assumes Linux, Python 3.12, Node.js 24, npm, and OpenClaw `2026.7.1`.
 
-Example paths used below:
+Use `npm.cmd` and `openclaw.cmd` on Windows PowerShell if `.ps1` shims are
+blocked.
 
-- project: `~/claw`
-- benchmark repo: `~/agent-test-bench`
-
-Adjust the paths for your machine. Do not modify OpenClaw core or the
-`agent-test-bench` checkout.
-
-## 1. Install OpenClaw CLI
-
-The plugin is version-coupled to OpenClaw's plugin SDK and hook names. The
-package declares `openclaw >=2026.7.1` as its peer dependency, and this
-repository was validated against OpenClaw `2026.7.1`.
-
-Install the validated baseline version first:
-
-```bash
-npm install -g openclaw@2026.7.1
-openclaw --version
-```
-
-The version output should be `OpenClaw 2026.7.1` or a patch-compatible build.
-Do not use `openclaw@latest` for production installs unless you also rerun the
-runtime compatibility checks in this guide. Newer OpenClaw versions may change
-plugin SDK import paths, manifest handling, or hook payload shapes.
-
-## 2. Install Development Dependencies
-
-From the project root:
+## Install
 
 ```bash
 cd ~/claw
+npm install -g openclaw@2026.7.1
 python -m pip install -e 'services/scheduler[dev]'
 
 cd packages/openclaw-plugin
 npm install
+npm run typecheck
+npm run build
+cd ../..
 ```
 
-The Python dev extra includes the sidecar test dependencies and `jsonschema`
-for contract validation.
-
-If editable install fails with a missing `build_editable` hook, either upgrade
-the packaging tools or install non-editable. The sidecar commands in this guide
-set `PYTHONPATH=src`, so non-editable install is sufficient for local
-development dependencies:
+If editable Python install fails:
 
 ```bash
-python -m pip install --upgrade pip setuptools wheel
 python -m pip install 'services/scheduler[dev]'
 ```
 
-## 3. Build The Plugin
-
-```bash
-cd ~/claw/packages/openclaw-plugin
-npm run typecheck
-npm run build
-```
-
-The build output is `packages/openclaw-plugin/dist/index.js`. OpenClaw loads
-that file through `packages/openclaw-plugin/openclaw.plugin.json`.
-
-## 4. Link It Into OpenClaw
+## Link Plugin
 
 ```bash
 cd ~/claw
@@ -75,11 +35,7 @@ openclaw plugins enable hardware-scheduler
 openclaw plugins inspect hardware-scheduler --runtime --json
 ```
 
-OpenClaw 2026.7.1 does not support `--force` together with `--link`. If you
-need to replace an existing link, remove or uninstall the existing plugin first,
-then rerun the `plugins install --link` command.
-
-A healthy runtime inspect reports the plugin as loaded with these hooks:
+Expected hooks:
 
 ```text
 before_tool_call
@@ -88,61 +44,44 @@ model_call_started
 model_call_ended
 ```
 
-Those hooks are the entire online integration point. The plugin does not patch
-OpenClaw core and does not replace the OpenClaw agent loop.
-
-## 5. Start The Scheduler Sidecar
-
-In a separate shell:
+## Start Sidecar
 
 ```bash
 cd ~/claw/services/scheduler
 export PYTHONPATH=src
 export AGENT_SCHEDULER_DB_PATH=../../data/scheduler.sqlite3
 export AGENT_SCHEDULER_POLICY=observe-only
+export AGENT_SCHEDULER_TRACE_PATH=../../data/trace.jsonl
 python -m agent_scheduler.main --host 127.0.0.1 --port 8765
 ```
 
-Check that it is alive:
+Health checks:
 
 ```bash
 curl http://127.0.0.1:8765/health/live
 curl http://127.0.0.1:8765/health/ready
 ```
 
-The sidecar owns persistence, prediction, admission policy, runtime samples,
-and metrics. The OpenClaw plugin talks to it over local HTTP.
+## Run A Local Demo
 
-Install also exposes the reference launcher console script:
-
-```bash
-claw-launch --help
-```
-
-The launcher is used only when the plugin is configured with
-`executionBackend: "managed-wrapper"`.
-
-## 6. Optional Docker Compose Sidecar
-
-Docker Compose starts only the sidecar. It does not mount the Docker socket and
-does not run OpenClaw or `agent-test-bench`:
+From another shell:
 
 ```bash
 cd ~/claw
-docker compose up --build scheduler
+python tools/demo_supported_features.py --run-launcher
 ```
 
-The service listens on `127.0.0.1:8765` on the host. Inside the container it
-binds `0.0.0.0` so Docker port publishing can reach it.
+Inspect sidecar output:
 
-## 7. Run OpenClaw With The Plugin Active
+```bash
+curl http://127.0.0.1:8765/v1/tools/recent
+curl http://127.0.0.1:8765/metrics
+tail -n 20 data/trace.jsonl
+```
 
-This scheduler is independent of the LLM provider. Configure the model in
-OpenClaw first, then this plugin observes tool lifecycle hooks and reports
-metadata to the sidecar. It does not add or replace OpenClaw model providers,
-and it does not require DeepSeek.
+## Run With OpenClaw
 
-Choose a model ID that OpenClaw actually knows on this machine:
+Choose a model that your OpenClaw installation can actually run:
 
 ```bash
 openclaw models list
@@ -150,120 +89,31 @@ openclaw models status
 export OPENCLAW_TEST_MODEL='<provider/model-from-openclaw-models-list>'
 ```
 
-The exact model IDs are owned by the installed OpenClaw version, provider
-plugins, and model registry. Do not assume a provider's public API model name is
-accepted by OpenClaw until `openclaw models list` or `openclaw models status`
-shows it.
-
-### Optional DeepSeek Provider
-
-DeepSeek is an OpenClaw model provider, not a requirement of this scheduler.
-Configure credentials outside this repository. For example:
+Run a task that uses shell tools:
 
 ```bash
-export DEEPSEEK_API_KEY='<your-key>'
+openclaw agent --local --agent main --model "$OPENCLAW_TEST_MODEL" \
+  --message 'Use the shell to print the current working directory, then summarize it.'
 ```
 
-If you want to use DeepSeek, install OpenClaw's official DeepSeek provider
-plugin and restart the Gateway first:
-
-```bash
-openclaw plugins install @openclaw/deepseek-provider
-openclaw gateway restart
-openclaw onboard --auth-choice deepseek-api-key
-openclaw models list --provider deepseek
-```
-
-For scripted Linux setup:
-
-```bash
-openclaw onboard --non-interactive \
-  --mode local \
-  --auth-choice deepseek-api-key \
-  --deepseek-api-key "$DEEPSEEK_API_KEY" \
-  --skip-health \
-  --accept-risk
-```
-
-If Gateway runs as a systemd user service, make the key available to that
-service, not only to the current shell. For example, put it in `~/.openclaw/.env`
-or configure OpenClaw's environment handling, then restart Gateway.
-
-After the DeepSeek provider plugin is installed, expected DeepSeek refs include
-`deepseek/deepseek-v4-flash` and `deepseek/deepseek-v4-pro`.
-
-### Optional Local vLLM Provider
-
-OpenClaw can also use a local vLLM server through its OpenAI-compatible `/v1`
-API. Start vLLM so it exposes `/v1/models` and `/v1/chat/completions`, usually
-at `http://127.0.0.1:8000/v1`, then configure OpenClaw:
-
-```bash
-export VLLM_API_KEY='vllm-local'
-openclaw onboard --non-interactive \
-  --mode local \
-  --auth-choice vllm \
-  --custom-base-url 'http://127.0.0.1:8000/v1' \
-  --custom-api-key "$VLLM_API_KEY" \
-  --custom-model-id '<your-vllm-model-id>'
-openclaw models list --provider vllm
-```
-
-If the local vLLM server does not enforce auth, any non-empty
-`VLLM_API_KEY` value is sufficient.
-
-Run a small agent call:
-
-```bash
-openclaw agent --local --agent main --model "$OPENCLAW_TEST_MODEL" --message 'Reply with exactly: openclaw-ok'
-```
-
-For plugin observation, run a task that actually uses tools:
-
-```bash
-openclaw agent --local --agent main --model "$OPENCLAW_TEST_MODEL" --message 'Use the shell to print the current working directory, then summarize it in one sentence.'
-```
-
-After the run, inspect the scheduler:
+Then inspect:
 
 ```bash
 curl http://127.0.0.1:8765/v1/tools/recent
 curl http://127.0.0.1:8765/metrics
+tail -n 20 ~/claw/data/trace.jsonl
 ```
 
-If OpenClaw exposes a tool PID, the sample can include PID-attributed CPU, RSS,
-I/O, and context-switch deltas. If not, the sample is still useful for tool
-duration, prediction, and scheduling state, but it is marked:
+## Exec Backends
 
-```json
-"attribution_status": "unattributed"
-```
+`executionBackend` controls built-in `exec` handling:
 
-That is intentional. The sidecar does not pretend its own process metrics are
-the tool's metrics.
+- `hook-only`: observe/report only.
+- `marker`: preserve command and add correlation env vars.
+- `managed-wrapper`: register original command with the sidecar, then rewrite
+  OpenClaw's command to `claw-launch`.
 
-## 8. What Happens During A Tool Call
-
-The live path is:
-
-```text
-OpenClaw tool hook
-  -> hardware-scheduler plugin
-  -> POST /v1/decisions/tool
-  -> sidecar prediction + policy
-  -> OpenClaw runs or blocks the tool
-  -> POST /v1/events/tool-completed
-  -> SQLite sample + Prometheus metrics
-```
-
-The plugin sends metadata, feature counts, a parameter digest, and an
-`operation_hint` such as `pytest`, `grep`, or `git`. It does not send full
-prompts, model responses, tool output, credentials, or raw tool parameters by
-default.
-
-### Managed Wrapper Path
-
-For controlled `exec` attribution, configure the plugin:
+Minimal managed-wrapper config:
 
 ```json5
 {
@@ -278,137 +128,48 @@ For controlled `exec` attribution, configure the plugin:
 }
 ```
 
-The runtime path becomes:
-
-```text
-before_tool_call
-  -> POST /v2/executions
-  -> OpenClaw exec runs claw-launch
-  -> claw-launch claims the spec
-  -> claw-launch runs /bin/sh -lc <original command>
-  -> claw-launch reports started/exited
-  -> after_tool_call asks the sidecar for the trusted scope
-```
-
-The current Python launcher registers PID scope and preserves stdin/stdout/
-stderr. On Linux, it can also create a per-execution cgroup and apply CPU
-placement when the scheduler returns a placement such as `cpu_set: "0-3"`.
-
-For a writable non-system test root:
+For cgroup-v2 CPU placement experiments on Linux:
 
 ```bash
+sudo mkdir -p /sys/fs/cgroup/claw
+sudo chown "$USER":"$USER" /sys/fs/cgroup/claw
 export CLAW_CGROUP_ROOT=/sys/fs/cgroup/claw
 ```
 
-The launcher writes `cpuset.mems` before `cpuset.cpus`, moves the child into
-the cgroup before `exec`, and calls `sched_setaffinity` as a second guard. If
-the cgroup path is unavailable or not writable, it falls back to PID scope
-without printing scheduler metadata to stdout/stderr. NUMA memory policy
-binding and PMU/ksys/VTune wrapping are still future launcher work.
+Placement remains advisory policy-wise; the reference launcher applies cpuset
+only when it receives placement metadata and has a writable cgroup root.
 
-## 9. Use Tool Profiles
+## What The Trace Contains
 
-Profiles are JSON files matching `contracts/tool-profile.schema.json`.
+Set `AGENT_SCHEDULER_TRACE_PATH` to append agent-test-bench v5-shaped JSONL:
 
-Example sidecar startup with profiles:
-
-```bash
-cd ~/claw/services/scheduler
-export PYTHONPATH=src
-export AGENT_SCHEDULER_TOOL_PROFILES=../../artifacts/agent-test-bench-tool-profiles.json
-python -m agent_scheduler.main --host 127.0.0.1 --port 8765
+```json
+{"type":"trace_metadata","trace_format_version":5,"scaffold":"openclaw","mode":"collect"}
+{"type":"action","action_type":"tool_exec","action_id":"...","data":{"tool_name":"exec","tool_args":null,"tool_result":null,"resource_usage":{}}}
 ```
 
-When a matching tool request arrives, the sidecar returns predicted duration,
-resource class, and advisory placement metadata in the decision response.
+`tool_args` and `tool_result` are intentionally `null`. Resource usage is filled
+only when the sidecar has a trusted PID or cgroup scope.
 
-## 10. Run agent-test-bench Through The Adapter
-
-The benchmark adapter does not change `agent-test-bench`. It runs the original
-entry point from the benchmark repo:
-
-```text
-PYTHONPATH=src python -m trace_collect.cli ...
-```
-
-Set the benchmark checkout path once:
-
-```bash
-export AGENT_TEST_BENCH_ROOT=~/agent-test-bench
-```
-
-Preview the delegated command:
-
-```bash
-cd ~/claw
-python tools/run_agent_test_bench.py --dry-run -- \
-  --provider deepseek --model deepseek-chat \
-  --benchmark swe-rebench --scaffold openclaw \
-  --container docker --mcp-config none \
-  --sample 1
-```
-
-Run the benchmark for real:
-
-```bash
-cd ~/claw
-python tools/run_agent_test_bench.py -- \
-  --provider deepseek --model deepseek-chat \
-  --benchmark swe-rebench --scaffold openclaw \
-  --container docker --mcp-config none \
-  --sample 1
-```
-
-Everything after `--` is passed unchanged to `agent-test-bench`. Task
-selection, trace layout, Docker/Podman choice, fixed-image preparation,
-mirrors, resource monitoring, resume behavior, and `trace.jsonl` format remain
-owned by `agent-test-bench`.
-
-## 11. Validate An Existing Benchmark Run
-
-```bash
-cd ~/claw
-python tools/validate_agent_test_bench_run.py <run-dir> \
-  --events-out artifacts/agent-test-bench-events.jsonl \
-  --profiles-out artifacts/agent-test-bench-tool-profiles.json
-```
-
-The validator checks:
-
-- `trace.jsonl` files exist
-- `trace_metadata.trace_format_version` is `5`
-- `tool_exec` records exist unless `--allow-empty-tools` is set
-- image metadata can be discovered from `run_manifest.json` or `results.json`
-- scheduler-compatible events and profiles can be generated
-
-The original trace files are not modified.
-
-## 12. Validation Commands
-
-Run these before trusting a local change:
+## Validate
 
 ```bash
 cd ~/claw
 python tools/validate_contracts.py
-python -m pytest tests/test_agent_test_bench_adapter.py tests/test_import_agent_test_bench_trace.py --basetemp .pytest-tmp-root
+python -m pytest tests -q --basetemp .pytest-tmp-root
 
-cd ~/claw/services/scheduler
-python -m pytest
+cd services/scheduler
+python -m pytest tests -q
 
-cd ~/claw/packages/openclaw-plugin
+cd ../../packages/openclaw-plugin
 npm test
 npm run typecheck
 npm run build
-
-cd ~/claw
-openclaw --version
-openclaw plugins inspect hardware-scheduler --runtime --json
 ```
 
-For OpenClaw upgrades, also rerun the plugin link step:
+For OpenClaw upgrades, rerun:
 
 ```bash
-cd ~/claw
 openclaw plugins install --link ./packages/openclaw-plugin
 openclaw plugins inspect hardware-scheduler --runtime --json
 ```

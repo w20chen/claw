@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agent_scheduler.contracts.models import ToolBeforeRequest, ToolCompletedEvent
+from agent_scheduler.contracts.models import ResourceScope, ToolBeforeRequest, ToolCompletedEvent
 from agent_scheduler.monitoring.process import ProcessResourceSampler, ResourceSnapshot
 from agent_scheduler.predictors.static_profile import extract_operation
 
@@ -22,6 +22,8 @@ class ToolRuntimeSample:
     rss_bytes_after: int | None
     read_bytes_delta: int | None
     write_bytes_delta: int | None
+    net_rx_bytes_delta: int | None
+    net_tx_bytes_delta: int | None
     ctx_switches_delta: int | None
     resource_class: str
     target_pid: int | None
@@ -90,6 +92,8 @@ class RealtimeToolMonitor:
             rss_bytes_after=end.rss_bytes,
             read_bytes_delta=_delta_int(start.read_bytes, end.read_bytes),
             write_bytes_delta=_delta_int(start.write_bytes, end.write_bytes),
+            net_rx_bytes_delta=_delta_int(start.net_rx_bytes, end.net_rx_bytes),
+            net_tx_bytes_delta=_delta_int(start.net_tx_bytes, end.net_tx_bytes),
             ctx_switches_delta=_delta_int(start.ctx_switches, end.ctx_switches),
             resource_class=resource_class,
             target_pid=end.target_pid if end.target_pid is not None else start.target_pid,
@@ -101,6 +105,20 @@ class RealtimeToolMonitor:
 
     def active_count(self) -> int:
         return len(self._active)
+
+    def bind_scope(self, tool_call_id: str | None, scope: ResourceScope) -> None:
+        if tool_call_id is None:
+            return
+        active = self._pop_by_tool_call_id(tool_call_id)
+        if active is None:
+            return
+        request = active.request.model_copy(update={"resource_scope": scope})
+        self._active[self._key(request.tool_call_id, request.event_id)] = _ActiveTool(
+            request=request,
+            snapshot=self.sampler.snapshot(request.resource_scope),
+            resource_class=active.resource_class,
+            operation=active.operation,
+        )
 
     def _pop_by_tool_call_id(self, tool_call_id: str) -> _ActiveTool | None:
         for key, active in list(self._active.items()):

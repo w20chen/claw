@@ -41,6 +41,7 @@ Stored sample fields include:
   read it
 - cgroup-v2 CPU time, memory, I/O, process count, and context-switch deltas
   when a trusted scope includes `kind: "cgroup-v2"` and `cgroup_path`
+- best-effort network rx/tx deltas from `/proc/<pid>/net/dev`
 - predicted `resource_class`
 
 Inspect the most recent samples:
@@ -61,7 +62,12 @@ Useful metrics:
 - `scheduler_tool_process_count`
 - `scheduler_tool_io_read_bytes_total`
 - `scheduler_tool_io_write_bytes_total`
+- `scheduler_tool_net_rx_bytes_total`
+- `scheduler_tool_net_tx_bytes_total`
 - `scheduler_tool_context_switches_total`
+
+Set `AGENT_SCHEDULER_TRACE_PATH` to append live agent-test-bench v5-shaped
+`trace.jsonl` records. Tool args and tool results are written as `null`.
 
 ## Managed Execution Registration
 

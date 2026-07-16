@@ -58,6 +58,10 @@ class ExecutionRegistry:
         record = self._by_execution_id.get(execution_id)
         return None if record is None else record.scope
 
+    def get(self, execution_id: str) -> ExecutionRecord | None:
+        self._sweep()
+        return self._by_execution_id.get(execution_id)
+
     def claim(self, request: ExecutionClaimRequest) -> ExecutionClaimResponse:
         self._sweep()
         record = self._by_execution_id.get(request.execution_id)

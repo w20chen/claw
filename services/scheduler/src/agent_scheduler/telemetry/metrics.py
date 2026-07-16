@@ -14,6 +14,8 @@ class Metrics:
         self.tool_cpu_seconds_total = 0.0
         self.tool_io_read_bytes_total = 0
         self.tool_io_write_bytes_total = 0
+        self.tool_net_rx_bytes_total = 0
+        self.tool_net_tx_bytes_total = 0
         self.tool_context_switches_total = 0
         self.latest_tool_memory_rss_bytes = 0
         self.latest_tool_process_count = 0
@@ -31,6 +33,10 @@ class Metrics:
             self.tool_io_read_bytes_total += sample.read_bytes_delta
         if sample.write_bytes_delta is not None:
             self.tool_io_write_bytes_total += sample.write_bytes_delta
+        if sample.net_rx_bytes_delta is not None:
+            self.tool_net_rx_bytes_total += sample.net_rx_bytes_delta
+        if sample.net_tx_bytes_delta is not None:
+            self.tool_net_tx_bytes_total += sample.net_tx_bytes_delta
         if sample.ctx_switches_delta is not None:
             self.tool_context_switches_total += sample.ctx_switches_delta
         if sample.rss_bytes_after is not None:
@@ -68,6 +74,10 @@ class Metrics:
         lines.append(f"scheduler_tool_io_read_bytes_total {self.tool_io_read_bytes_total}")
         lines.append("# TYPE scheduler_tool_io_write_bytes_total counter")
         lines.append(f"scheduler_tool_io_write_bytes_total {self.tool_io_write_bytes_total}")
+        lines.append("# TYPE scheduler_tool_net_rx_bytes_total counter")
+        lines.append(f"scheduler_tool_net_rx_bytes_total {self.tool_net_rx_bytes_total}")
+        lines.append("# TYPE scheduler_tool_net_tx_bytes_total counter")
+        lines.append(f"scheduler_tool_net_tx_bytes_total {self.tool_net_tx_bytes_total}")
         lines.append("# TYPE scheduler_tool_context_switches_total counter")
         lines.append(f"scheduler_tool_context_switches_total {self.tool_context_switches_total}")
         lines.append("# TYPE scheduler_decision_latency_seconds summary")

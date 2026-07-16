@@ -86,6 +86,8 @@ class SQLiteStore:
                 rss_bytes_after INTEGER,
                 read_bytes_delta INTEGER,
                 write_bytes_delta INTEGER,
+                net_rx_bytes_delta INTEGER,
+                net_tx_bytes_delta INTEGER,
                 ctx_switches_delta INTEGER,
                 resource_class TEXT NOT NULL,
                 target_pid INTEGER,
@@ -104,6 +106,8 @@ class SQLiteStore:
                 "process_count_before": "INTEGER",
                 "process_count_after": "INTEGER",
                 "attribution_status": "TEXT NOT NULL DEFAULT 'unattributed'",
+                "net_rx_bytes_delta": "INTEGER",
+                "net_tx_bytes_delta": "INTEGER",
             },
         )
         self.conn.commit()
@@ -170,10 +174,11 @@ class SQLiteStore:
                 event_id, tool_call_id, tool_name, operation, started_at, ended_at,
                 duration_ms, monitor_duration_ms, cpu_time_delta_s,
                 rss_bytes_before, rss_bytes_after, read_bytes_delta, write_bytes_delta,
-                ctx_switches_delta, resource_class, target_pid, process_count_before,
+                net_rx_bytes_delta, net_tx_bytes_delta, ctx_switches_delta,
+                resource_class, target_pid, process_count_before,
                 process_count_after, attribution_status, monitor_source, payload_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 sample.event_id,
@@ -189,6 +194,8 @@ class SQLiteStore:
                 sample.rss_bytes_after,
                 sample.read_bytes_delta,
                 sample.write_bytes_delta,
+                sample.net_rx_bytes_delta,
+                sample.net_tx_bytes_delta,
                 sample.ctx_switches_delta,
                 sample.resource_class,
                 sample.target_pid,

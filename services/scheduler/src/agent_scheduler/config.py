@@ -17,10 +17,12 @@ class SchedulerConfig:
     calibration_max_ratio: float = 4.0
     tool_profiles_path: Path | None = None
     auth_token: str | None = None
+    trace_path: Path | None = None
 
     @classmethod
     def from_env(cls) -> "SchedulerConfig":
         profile = os.getenv("AGENT_SCHEDULER_TOOL_PROFILES")
+        trace = os.getenv("AGENT_SCHEDULER_TRACE_PATH")
         return cls(
             db_path=Path(os.getenv("AGENT_SCHEDULER_DB_PATH", "scheduler.sqlite3")),
             policy=os.getenv("AGENT_SCHEDULER_POLICY", "observe-only"),
@@ -32,4 +34,5 @@ class SchedulerConfig:
             calibration_max_ratio=float(os.getenv("AGENT_SCHEDULER_CALIBRATION_MAX_RATIO", "4.0")),
             tool_profiles_path=Path(profile) if profile else None,
             auth_token=os.getenv("AGENT_SCHEDULER_TOKEN"),
+            trace_path=Path(trace) if trace else None,
         )

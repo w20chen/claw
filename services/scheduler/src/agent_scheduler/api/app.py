@@ -96,6 +96,8 @@ def create_app(state: AppState | None = None) -> FastAPI:
             sample = s.tool_monitor.complete(event)
             if s.store.save_tool_runtime_sample(sample):
                 s.metrics.observe_tool_runtime(sample)
+                if s.trace_writer is not None:
+                    s.trace_writer.record_tool(event, sample)
             s.metrics.inc("scheduler_tool_completions_total")
             s.metrics.tool_durations.append(event.duration_ms / 1000)
             if s.calibrator.update(event, None):
@@ -109,6 +111,8 @@ def create_app(state: AppState | None = None) -> FastAPI:
         _: None = Depends(auth),
     ) -> dict[str, bool]:
         s.store.save_model_event(event)
+        if s.trace_writer is not None:
+            s.trace_writer.record_model(event)
         return {"stored": True}
 
     @app.post("/v2/executions", response_model=ExecutionRegistrationResponse)
@@ -142,7 +146,11 @@ def create_app(state: AppState | None = None) -> FastAPI:
         s: AppState = Depends(get_state),
         _: None = Depends(auth),
     ) -> ExecutionUpdateResponse:
-        return s.executions.started(execution_id, request)
+        response = s.executions.started(execution_id, request)
+        record = s.executions.get(execution_id)
+        if record is not None and record.scope is not None:
+            s.tool_monitor.bind_scope(record.request.tool_call_id, record.scope)
+        return response
 
     @app.post("/v2/executions/{execution_id}/exited", response_model=ExecutionUpdateResponse)
     async def execution_exited(

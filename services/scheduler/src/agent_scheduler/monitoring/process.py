@@ -16,6 +16,8 @@ class ResourceSnapshot:
     rss_bytes: int | None
     read_bytes: int | None
     write_bytes: int | None
+    net_rx_bytes: int | None
+    net_tx_bytes: int | None
     ctx_switches: int | None
     target_pid: int | None
     process_count: int | None
@@ -73,6 +75,7 @@ class ProcessResourceSampler:
         io = self._read_cgroup_io_stat(cgroup_path)
         pids = self._read_cgroup_pids(cgroup_path)
         ctx_switches = self._aggregate_context_switches(pids)
+        net = self._read_proc_net_dev(scope.root_pid or scope.pid)
         return ResourceSnapshot(
             captured_at=now,
             monotonic_s=mono,
@@ -80,12 +83,14 @@ class ProcessResourceSampler:
             rss_bytes=memory_current,
             read_bytes=None if io is None else io[0],
             write_bytes=None if io is None else io[1],
+            net_rx_bytes=None if net is None else net[0],
+            net_tx_bytes=None if net is None else net[1],
             ctx_switches=ctx_switches,
             target_pid=scope.root_pid or scope.pid,
             process_count=len(pids) if pids else None,
             available=any(
                 value is not None
-                for value in (cpu_usec, memory_current, io, ctx_switches)
+                for value in (cpu_usec, memory_current, io, ctx_switches, net)
             ),
             source="cgroup-v2",
         )
@@ -172,6 +177,34 @@ class ProcessResourceSampler:
                     pass
         return total if found else None
 
+    @staticmethod
+    def _read_proc_net_dev(pid: int | None) -> tuple[int, int] | None:
+        if pid is None or pid <= 0:
+            return None
+        try:
+            text = Path(f"/proc/{pid}/net/dev").read_text(encoding="utf-8")
+        except OSError:
+            return None
+        rx_total = 0
+        tx_total = 0
+        found = False
+        for line in text.splitlines():
+            if "|" in line or line.startswith("Inter-"):
+                continue
+            iface, sep, rest = line.partition(":")
+            if sep != ":" or iface.strip() == "lo":
+                continue
+            fields = rest.split()
+            if len(fields) < 9:
+                continue
+            try:
+                rx_total += int(fields[0])
+                tx_total += int(fields[8])
+                found = True
+            except ValueError:
+                pass
+        return (rx_total, tx_total) if found else None
+
     def _snapshot_processes(
         self,
         now: float,
@@ -215,6 +248,7 @@ class ProcessResourceSampler:
             except Exception:
                 pass
             process_count += 1
+        net = self._read_proc_net_dev(target_pid)
         return ResourceSnapshot(
             captured_at=now,
             monotonic_s=mono,
@@ -222,10 +256,12 @@ class ProcessResourceSampler:
             rss_bytes=rss_bytes if found_memory else None,
             read_bytes=read_bytes if found_io else None,
             write_bytes=write_bytes if found_io else None,
+            net_rx_bytes=None if net is None else net[0],
+            net_tx_bytes=None if net is None else net[1],
             ctx_switches=ctx_switches if found_ctx else None,
             target_pid=target_pid,
             process_count=process_count,
-            available=found_cpu or found_memory or found_io or found_ctx,
+            available=found_cpu or found_memory or found_io or found_ctx or net is not None,
             source="psutil-process-tree",
         )
 
@@ -238,6 +274,8 @@ class ProcessResourceSampler:
             rss_bytes=None,
             read_bytes=None,
             write_bytes=None,
+            net_rx_bytes=None,
+            net_tx_bytes=None,
             ctx_switches=None,
             target_pid=target_pid,
             process_count=None,

@@ -14,6 +14,7 @@ from agent_scheduler.predictors.static_profile import StaticProfilePredictor
 from agent_scheduler.storage.sqlite import SQLiteStore
 from agent_scheduler.telemetry.metrics import Metrics
 from agent_scheduler.topology.linux import read_topology
+from agent_scheduler.trace import AgentTestBenchTraceWriter
 
 
 @dataclass
@@ -28,6 +29,7 @@ class AppState:
     executions: ExecutionRegistry
     metrics: Metrics
     topology: dict
+    trace_writer: AgentTestBenchTraceWriter | None
 
 
 def build_state(config: SchedulerConfig | None = None) -> AppState:
@@ -52,4 +54,5 @@ def build_state(config: SchedulerConfig | None = None) -> AppState:
         executions=ExecutionRegistry(),
         metrics=Metrics(),
         topology=read_topology(),
+        trace_writer=AgentTestBenchTraceWriter(cfg.trace_path) if cfg.trace_path else None,
     )
