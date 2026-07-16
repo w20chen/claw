@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterable
 
 
-DEFAULT_LLM_UPSTREAM_BASE_URL = "https://api.deepseek.com/v1"
+DEFAULT_LLM_UPSTREAM_BASE_URL = "https://api.deepseek.com"
 
 
 @dataclass(frozen=True)

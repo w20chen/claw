@@ -20,15 +20,7 @@ class AgentTestBenchTraceWriter:
         self._tool_starts: dict[str, ToolBeforeRequest] = {}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not self.path.exists() or self.path.stat().st_size == 0:
-            self._append(
-                {
-                    "type": "trace_metadata",
-                    "trace_format_version": 5,
-                    "scaffold": scaffold,
-                    "mode": "collect",
-                    "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                }
-            )
+            self._append(self._metadata_record())
 
     def record_tool_started(self, event: ToolBeforeRequest) -> None:
         self._tool_starts[_tool_key(event.tool_call_id, event.event_id)] = event
@@ -144,7 +136,23 @@ class AgentTestBenchTraceWriter:
         line = json.dumps(record, sort_keys=True, separators=(",", ":"))
         with self._lock:
             with self.path.open("a", encoding="utf-8") as fh:
+                if record.get("type") != "trace_metadata" and self.path.stat().st_size == 0:
+                    metadata = json.dumps(
+                        self._metadata_record(),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    fh.write(metadata + "\n")
                 fh.write(line + "\n")
+
+    def _metadata_record(self) -> dict[str, Any]:
+        return {
+            "type": "trace_metadata",
+            "trace_format_version": 5,
+            "scaffold": self.scaffold,
+            "mode": "collect",
+            "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
 
     def _pop_tool_start(self, event: ToolCompletedEvent) -> ToolBeforeRequest | None:
         start = self._tool_starts.pop(_tool_key(event.tool_call_id, event.event_id), None)

@@ -317,6 +317,52 @@ def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Pa
     assert model_records[0]["data"]["content"] == "done"
 
 
+def test_trace_metadata_is_recreated_if_trace_file_is_deleted(tmp_path: Path, monkeypatch) -> None:
+    client, trace_path = _trace_proxy_client(tmp_path)
+    trace_path.unlink()
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def post(self, url, headers=None, content=None):
+            return httpx.Response(
+                200,
+                json={
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion",
+                    "model": "test-model",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "world"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+
+    monkeypatch.setattr("agent_scheduler.llm_proxy.httpx.AsyncClient", FakeAsyncClient)
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "hello"}],
+        },
+    )
+
+    assert response.status_code == 200
+    records = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+    assert records[0]["type"] == "trace_metadata"
+    assert records[1]["action_type"] == "llm_call"
+
+
 def test_llm_proxy_records_full_request_and_response(tmp_path: Path, monkeypatch) -> None:
     client, trace_path = _trace_proxy_client(tmp_path)
 

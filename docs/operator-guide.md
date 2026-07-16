@@ -174,6 +174,9 @@ only for another OpenAI-compatible upstream, and set
 `AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY` only if OpenClaw does not send auth to
 the proxy.
 
+DeepSeek's built-in default is `https://api.deepseek.com`. Do not add `/v1`
+unless your chosen upstream actually expects it.
+
 Check health from another shell:
 
 ```bash
@@ -269,6 +272,11 @@ export CLAW_CGROUP_ROOT=/sys/fs/cgroup/claw
 
 Then rerun the OpenClaw task. `resource_usage.monitor_source` should become
 `cgroup-v2` when the launcher successfully registers a cgroup scope.
+If the trace still shows `attr=pid` or `monitor_source=psutil-process-tree`,
+the task is still being monitored by PID process tree. That is usable, but it
+means either the OpenClaw/plugin process did not inherit `CLAW_CGROUP_ROOT`, or
+the launcher could not create/read the cgroup. Rebuild and relink the plugin
+after updates so it forwards `CLAW_CGROUP_ROOT` into wrapped `exec` calls.
 
 ## 9. Troubleshooting
 
@@ -328,6 +336,9 @@ If no model can run:
 - For full LLM input/output, confirm the selected provider is using
   `http://127.0.0.1:8765/v1` as its base URL. If it bypasses the sidecar proxy,
   model hook records may contain metadata only.
+- If OpenClaw logs show `https://api.deepseek.com/chat/completions`, it is
+  bypassing the sidecar proxy. After proxy routing is correct, the request URL
+  in OpenClaw logs should point at `http://127.0.0.1:8765/...`.
 
 ## 10. Sidecar-Only Smoke Test
 

@@ -68,6 +68,7 @@ export async function instrumentExecParams(
 
   params.env = {
     ...safeExecEnv(params.env),
+    ...launcherEnv(),
     CLAW_EXECUTION_ID: executionId,
     CLAW_TOOL_CALL_ID: payload.tool_call_id ?? "",
     CLAW_RUN_ID: runId ?? "",
@@ -142,6 +143,15 @@ function safeExecEnv(value: unknown): Record<string, unknown> {
   for (const [key, item] of Object.entries(value)) {
     if (blocked.has(key)) continue;
     output[key] = item;
+  }
+  return output;
+}
+
+function launcherEnv(): Record<string, string> {
+  const output: Record<string, string> = {};
+  for (const key of ["CLAW_CGROUP_ROOT", "CLAW_CGROUP_PATH", "CLAW_CGROUP_REQUIRED"]) {
+    const value = process.env[key];
+    if (typeof value === "string" && value.length > 0) output[key] = value;
   }
   return output;
 }

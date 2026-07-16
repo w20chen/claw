@@ -91,6 +91,9 @@ The proxy forwards OpenClaw's `Authorization` header by default, so provider
 keys already stored by OpenClaw do not need to be duplicated in `.env`.
 DeepSeek's upstream URL is the built-in default; edit `.env` only for another
 OpenAI-compatible upstream.
+If OpenClaw logs still show requests going directly to
+`https://api.deepseek.com/...`, the proxy is not in the path yet and full LLM
+messages will not appear in `trace.jsonl`.
 
 Link the plugin:
 

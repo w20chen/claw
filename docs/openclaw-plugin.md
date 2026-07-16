@@ -46,6 +46,9 @@ under `CLAW_CGROUP_ROOT`, write `cpuset.mems` before `cpuset.cpus`, move the
 child before `exec`, and apply `sched_setaffinity`. A later static host
 launcher should harden cleanup, NUMA memory policy, and PMU/ksys/VTune
 wrapping.
+The plugin forwards launcher-specific environment variables such as
+`CLAW_CGROUP_ROOT` into wrapped `exec` calls when they are visible to the
+OpenClaw/plugin process.
 
 The plugin no longer recursively searches event/context payloads for PID-like
 keys. `after_tool_call` uses a fixed hook-provided `resource_scope` /

@@ -41,6 +41,10 @@ provider, configure the real upstream provider on the sidecar:
 AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL=http://127.0.0.1:8000/v1
 ```
 
+The built-in DeepSeek default is `https://api.deepseek.com`. If OpenClaw logs
+still show requests going directly to `https://api.deepseek.com/...`, the
+sidecar proxy is not receiving LLM traffic yet.
+
 The proxy forwards OpenClaw's `Authorization` header by default, so do not
 duplicate API keys in sidecar config unless OpenClaw does not send auth to the
 proxy. Use `AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY` only as an explicit override.

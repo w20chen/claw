@@ -118,6 +118,29 @@ test("exec instrumentation drops shell startup env override keys", async () => {
   assert.equal("ENV" in result.params.env, false);
 });
 
+test("exec instrumentation forwards launcher cgroup environment", async () => {
+  const previous = process.env.CLAW_CGROUP_ROOT;
+  process.env.CLAW_CGROUP_ROOT = "/sys/fs/cgroup/claw";
+  const client = {
+    async registerExecution() {
+      return {one_time_token: "token-1"};
+    }
+  };
+  const event = {toolName: "exec", toolCallId: "call-1", params: {command: "pytest tests -q"}};
+
+  try {
+    const result = await instrumentExecParams(event, {}, payload, decision, client, baseConfig);
+
+    assert.equal(result.params.env.CLAW_CGROUP_ROOT, "/sys/fs/cgroup/claw");
+  } finally {
+    if (previous === undefined) {
+      delete process.env.CLAW_CGROUP_ROOT;
+    } else {
+      process.env.CLAW_CGROUP_ROOT = previous;
+    }
+  }
+});
+
 test("managed-wrapper rewrites command to launcher token only", async () => {
   const client = {
     async registerExecution() {
