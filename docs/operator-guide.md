@@ -29,6 +29,12 @@ hook payloads to the sidecar. If OpenClaw does not expose a specific internal
 field to plugin hooks, the plugin cannot record that field without changing
 OpenClaw itself.
 
+In the currently observed OpenClaw `2026.7.1` model hooks, provider/model,
+duration, token budget, request/response byte counts, and transport metadata
+are visible, but full `messages_in` and model `content` may not be exposed to
+the plugin hook. Tool hooks do expose `params` and `result`, so `tool_args` and
+`tool_result` should be populated when `recordRawTrace=true`.
+
 Resource fields are strongest for `exec` in `managed-wrapper` mode because
 `claw-launch` gives the sidecar a trusted PID or cgroup scope. Without a
 trusted scope, the trace still records the tool action, but resource attribution
