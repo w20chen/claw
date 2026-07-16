@@ -35,6 +35,11 @@ Not implemented in this MVP:
 
 ## Quick Start
 
+For copy-pasteable local commands, read
+[`docs/operator-guide.md`](docs/operator-guide.md). It covers OpenClaw setup,
+plugin linking, sidecar startup, live observation, and the `agent-test-bench`
+adapter.
+
 ```bash
 make dev-sidecar
 make test
@@ -106,7 +111,8 @@ into the online plugin runtime.
 
 To run benchmarks through the original harness and then validate/import traces,
 use `tools/run_agent_test_bench.py`; see
-`docs/agent-test-bench-benchmark.md`.
+[`docs/agent-test-bench-benchmark.md`](docs/agent-test-bench-benchmark.md) or
+the end-to-end flow in [`docs/operator-guide.md`](docs/operator-guide.md).
 
 At runtime, the OpenClaw plugin sends tool start/completion events to the
 sidecar. The sidecar stores correlated runtime samples in SQLite and exposes the
