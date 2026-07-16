@@ -21,6 +21,9 @@ Implemented:
 - TypeScript OpenClaw plugin source with redaction, timeout-aware HTTP client,
   observe/enforce mode handling, and correlation TTL.
 - `agent-test-bench` trace importer for offline `trace.jsonl` conversion.
+- External `agent-test-bench` benchmark adapter that delegates to the original
+  `trace_collect.cli` command and validates/imports the produced traces without
+  changing benchmark behavior.
 
 Not implemented in this MVP:
 
@@ -100,6 +103,10 @@ research and evaluation source. This project reads exported canonical
 `trace.jsonl` files and can generate scheduler tool profiles from `tool_exec`
 spans, but does not import its AgentLoop, benchmark runner, or agent scaffold
 into the online plugin runtime.
+
+To run benchmarks through the original harness and then validate/import traces,
+use `tools/run_agent_test_bench.py`; see
+`docs/agent-test-bench-benchmark.md`.
 
 At runtime, the OpenClaw plugin sends tool start/completion events to the
 sidecar. The sidecar stores correlated runtime samples in SQLite and exposes the

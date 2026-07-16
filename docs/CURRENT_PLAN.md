@@ -58,7 +58,8 @@ risk.
 - [x] Phase 6: Packaging/deployment docs and examples
 - [x] Phase 7: Official runtime inspect
 - [x] Phase 8: Real-time tool lifecycle monitoring MVP
-- [ ] Phase 9: Full independent code review
+- [x] Phase 9: External `agent-test-bench` benchmark adapter
+- [ ] Phase 10: Full independent code review
 
 ## Completed Tests
 
@@ -97,6 +98,12 @@ Updated as commands are run:
   - Metrics showed one request, one decision, and one completion.
 - Passed: `python -m pytest tests\test_import_agent_test_bench_trace.py --basetemp .pytest-tmp-root`
   - Validated agent-test-bench trace import and generated profile output.
+- Passed: `python -m pytest tests\test_agent_test_bench_adapter.py tests\test_import_agent_test_bench_trace.py --basetemp .pytest-tmp-root`
+  - Validated external benchmark adapter dry-run delegation, trace validation,
+    image metadata discovery, scheduler event export, and profile generation.
+- Passed: `python tools\run_agent_test_bench.py --bench-root C:\Users\29068\Desktop\agent-test-bench --dry-run -- --provider deepseek --model deepseek-chat --benchmark swe-rebench --scaffold openclaw --container docker --mcp-config none --sample 1`
+  - Confirmed the adapter delegates to `python -m trace_collect.cli` inside
+    `agent-test-bench` with `PYTHONPATH=<agent-test-bench>\src`.
 - Passed: `python tools\validate_contracts.py`
   - Re-run after real-time monitoring changes; contract examples still validate.
 - Passed: `cd packages/openclaw-plugin && npm.cmd pack --dry-run --cache .\.npm-cache`

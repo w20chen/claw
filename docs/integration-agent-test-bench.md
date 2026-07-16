@@ -24,6 +24,20 @@ python tools/import_agent_test_bench_trace.py input-trace.jsonl output-events.js
   --profiles-out tool-profiles.generated.json
 ```
 
+Benchmark adapter:
+
+```bash
+python tools/run_agent_test_bench.py -- \
+  --provider deepseek --model deepseek-chat \
+  --benchmark swe-rebench --scaffold openclaw \
+  --container docker --mcp-config none \
+  --sample 1
+```
+
+Everything after `--` is passed unchanged to
+`python -m trace_collect.cli` inside the `agent-test-bench` repository. This
+preserves benchmark CLI usage, trace layout, and image handling.
+
 The importer maps canonical tool execution spans into offline
 `ToolCompletedEvent` records when duration information is available. It can
 also aggregate observed `tool_exec` durations into scheduler-compatible static
@@ -34,6 +48,7 @@ tool profiles.
 agent-test-bench capability | Scheduler integration
 ---|---
 Canonical `trace.jsonl` | Imported with `tools/import_agent_test_bench_trace.py`.
+Benchmark CLI | Delegated with `tools/run_agent_test_bench.py`; arguments after `--` are passed verbatim to `trace_collect.cli`.
 `trace_format_version: 5` metadata | Read to preserve `run_id` when available.
 OpenClaw `tool_exec` actions | Converted to `ToolCompletedEvent` and profile samples.
 Classified exec names such as `exec-pytest` | `exec-*` suffix becomes profile `operation`.
