@@ -41,7 +41,7 @@ cd services/scheduler
 python -m pytest
 
 cd ../..
-openclaw plugins install --link ./packages/openclaw-plugin --force
+openclaw plugins install --link ./packages/openclaw-plugin
 openclaw plugins inspect hardware-scheduler --runtime --json
 ```
 
@@ -74,7 +74,7 @@ When upgrading OpenClaw:
 ```bash
 npm install -g openclaw@<target-version>
 openclaw --version
-openclaw plugins install --link ./packages/openclaw-plugin --force
+openclaw plugins install --link ./packages/openclaw-plugin
 openclaw plugins inspect hardware-scheduler --runtime --json
 ```
 

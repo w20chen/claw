@@ -5,7 +5,7 @@ The plugin package is `packages/openclaw-plugin`.
 Link it into the local OpenClaw installation from the project root:
 
 ```bash
-openclaw plugins install --link ./packages/openclaw-plugin --force
+openclaw plugins install --link ./packages/openclaw-plugin
 openclaw plugins enable hardware-scheduler
 openclaw plugins inspect hardware-scheduler --runtime --json
 ```

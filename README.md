@@ -76,7 +76,7 @@ npm pack
 Install with the official OpenClaw plugin CLI when available:
 
 ```bash
-openclaw plugins install --link ./packages/openclaw-plugin --force
+openclaw plugins install --link ./packages/openclaw-plugin
 openclaw plugins enable hardware-scheduler
 openclaw plugins inspect hardware-scheduler --runtime --json
 ```

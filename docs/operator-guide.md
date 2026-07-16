@@ -68,10 +68,14 @@ that file through `packages/openclaw-plugin/openclaw.plugin.json`.
 
 ```bash
 cd ~/claw
-openclaw plugins install --link ./packages/openclaw-plugin --force
+openclaw plugins install --link ./packages/openclaw-plugin
 openclaw plugins enable hardware-scheduler
 openclaw plugins inspect hardware-scheduler --runtime --json
 ```
+
+OpenClaw 2026.7.1 does not support `--force` together with `--link`. If you
+need to replace an existing link, remove or uninstall the existing plugin first,
+then rerun the `plugins install --link` command.
 
 A healthy runtime inspect reports the plugin as loaded with these hooks:
 
@@ -280,6 +284,6 @@ For OpenClaw upgrades, also rerun the plugin link step:
 
 ```bash
 cd ~/claw
-openclaw plugins install --link ./packages/openclaw-plugin --force
+openclaw plugins install --link ./packages/openclaw-plugin
 openclaw plugins inspect hardware-scheduler --runtime --json
 ```
