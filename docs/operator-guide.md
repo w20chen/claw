@@ -278,6 +278,15 @@ means either the OpenClaw/plugin process did not inherit `CLAW_CGROUP_ROOT`, or
 the launcher could not create/read the cgroup. Rebuild and relink the plugin
 after updates so it forwards `CLAW_CGROUP_ROOT` into wrapped `exec` calls.
 
+For cgroup troubleshooting, make fallback explicit:
+
+```bash
+export CLAW_CGROUP_REQUIRED=1
+```
+
+With this set, `claw-launch` exits with a visible `cgroup_unavailable` error
+instead of silently falling back to PID monitoring.
+
 ## 9. Troubleshooting
 
 If `openclaw config patch --stdin` fails with:

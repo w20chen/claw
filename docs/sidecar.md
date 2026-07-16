@@ -149,3 +149,5 @@ sampler then reads `cpu.stat`, `memory.current`, `io.stat`, and `cgroup.procs`
 directly. Without that cgroup path, the launcher registers a PID scope. Calls
 without any trusted scope are recorded as `attribution_status: "unattributed"`
 rather than misattributing sidecar process metrics to the tool.
+Set `CLAW_CGROUP_REQUIRED=1` while debugging if cgroup fallback should be a
+hard failure instead of a silent downgrade to PID monitoring.

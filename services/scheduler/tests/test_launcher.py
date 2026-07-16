@@ -101,6 +101,22 @@ def test_launcher_prepares_cgroup_with_cpuset_order(monkeypatch, tmp_path) -> No
     assert (tmp_path / "exec_1" / "cpuset.cpus").read_text(encoding="utf-8") == "2-3"
 
 
+def test_launcher_can_require_cgroup(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(launcher, "_supports_posix_controls", lambda: True)
+    monkeypatch.setenv("CLAW_CGROUP_ROOT", str(tmp_path))
+    monkeypatch.setenv("CLAW_CGROUP_REQUIRED", "1")
+    monkeypatch.delenv("CLAW_CGROUP_PATH", raising=False)
+    monkeypatch.setattr(launcher, "_write_file", lambda _path, _value: (_ for _ in ()).throw(OSError("blocked")))
+
+    with pytest.raises(RuntimeError, match="cgroup_unavailable"):
+        launcher._prepare_cgroup(
+            "exec:1",
+            "0",
+            None,
+            {"enable_cgroup": True},
+        )
+
+
 def test_launcher_passes_placement_to_spawn(monkeypatch, tmp_path) -> None:
     posts: list[tuple[str, dict[str, Any]]] = []
 

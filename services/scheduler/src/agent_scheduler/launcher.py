@@ -29,7 +29,8 @@ def main() -> None:
     if args.command_name == "run":
         try:
             raise SystemExit(run_execution(args.endpoint, args.execution_id, args.token))
-        except Exception:
+        except Exception as exc:
+            print(f"claw-launch: {exc}", file=sys.stderr)
             raise SystemExit(125) from None
     raise SystemExit(2)
 
@@ -220,7 +221,11 @@ def _prepare_cgroup(
         if cpu_set:
             _write_file(cgroup_path / "cpuset.cpus", cpu_set)
         return str(cgroup_path)
-    except OSError:
+    except OSError as exc:
+        if _env_enabled("CLAW_CGROUP_REQUIRED"):
+            raise RuntimeError(f"cgroup_unavailable root={root}: {exc}") from exc
+        if _env_enabled("CLAW_CGROUP_DEBUG"):
+            print(f"claw-launch: cgroup unavailable at {root}: {exc}", file=sys.stderr)
         return None
 
 
@@ -325,6 +330,10 @@ def _enabled(profiling: object, key: str, default: bool) -> bool:
         return default
     value = profiling.get(key)
     return value if isinstance(value, bool) else default
+
+
+def _env_enabled(name: str) -> bool:
+    return os.environ.get(name, "").lower() in {"1", "true", "yes", "on"}
 
 
 def _safe_execution_id(execution_id: str) -> str:

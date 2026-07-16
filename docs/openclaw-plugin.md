@@ -49,6 +49,8 @@ wrapping.
 The plugin forwards launcher-specific environment variables such as
 `CLAW_CGROUP_ROOT` into wrapped `exec` calls when they are visible to the
 OpenClaw/plugin process.
+It also forwards `CLAW_CGROUP_REQUIRED`, which makes the launcher fail loudly
+when cgroup creation is requested but unavailable.
 
 The plugin no longer recursively searches event/context payloads for PID-like
 keys. `after_tool_call` uses a fixed hook-provided `resource_scope` /
