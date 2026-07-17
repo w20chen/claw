@@ -157,3 +157,7 @@ hard failure instead of a silent downgrade to PID monitoring. This required
 mode forces a cgroup attempt even if profiling metadata disables cgroup and
 checks that the child process actually joined the cgroup. Join failures are
 reported as `cgroup_join_failed` or `cgroup_join_missing`.
+`[Errno 95] Operation not supported` during `cgroup.procs` writes means the
+host cgroup hierarchy rejected process migration into the child cgroup. In that
+case, leave required mode off and use PID process-tree monitoring unless the
+host cgroup delegation can be changed.

@@ -162,10 +162,12 @@ def test_launcher_required_cgroup_verifies_child_membership(monkeypatch, tmp_pat
 def test_launcher_required_cgroup_reports_parent_join_failure(monkeypatch, tmp_path) -> None:
     cgroup_path = tmp_path / "exec-1"
     cgroup_path.mkdir()
+    (cgroup_path / "cgroup.type").write_text("domain", encoding="utf-8")
+    (tmp_path / "cgroup.type").write_text("domain threaded", encoding="utf-8")
     monkeypatch.setenv("CLAW_CGROUP_REQUIRED", "1")
     monkeypatch.setattr(launcher, "_write_file", lambda _path, _value: (_ for _ in ()).throw(OSError("blocked")))
 
-    with pytest.raises(RuntimeError, match="cgroup_join_failed"):
+    with pytest.raises(RuntimeError, match=r"cgroup_join_failed.*type='domain'.*parent_type='domain threaded'"):
         launcher._join_child_cgroup(456, str(cgroup_path))
 
 

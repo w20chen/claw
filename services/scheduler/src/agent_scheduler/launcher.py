@@ -264,7 +264,10 @@ def _join_child_cgroup(child_pid: int, cgroup_path: str | None) -> bool:
         return True
     except OSError as exc:
         if _env_enabled("CLAW_CGROUP_REQUIRED"):
-            raise RuntimeError(f"cgroup_join_failed path={cgroup_path} child_pid={child_pid}: {exc}") from exc
+            details = _cgroup_debug_details(Path(cgroup_path), child_pid)
+            raise RuntimeError(
+                f"cgroup_join_failed path={cgroup_path} child_pid={child_pid}: {exc}; {details}"
+            ) from exc
         return False
 
 
@@ -277,7 +280,8 @@ def _verify_child_cgroup(child_pid: int, cgroup_path: str | None) -> None:
     except (OSError, ValueError) as exc:
         raise RuntimeError(f"cgroup_verify_failed path={cgroup_path}: {exc}") from exc
     if child_pid not in pids:
-        raise RuntimeError(f"cgroup_join_missing path={cgroup_path} child_pid={child_pid}")
+        details = _cgroup_debug_details(Path(cgroup_path), child_pid)
+        raise RuntimeError(f"cgroup_join_missing path={cgroup_path} child_pid={child_pid}; {details}")
 
 
 def _terminate_child_best_effort(child: subprocess.Popen[bytes]) -> None:
@@ -289,6 +293,32 @@ def _terminate_child_best_effort(child: subprocess.Popen[bytes]) -> None:
             child.kill()
         except Exception:
             pass
+
+
+def _cgroup_debug_details(cgroup_path: Path, child_pid: int) -> str:
+    parent = cgroup_path.parent
+    fields = {
+        "type": _read_text_one_line(cgroup_path / "cgroup.type"),
+        "parent_type": _read_text_one_line(parent / "cgroup.type"),
+        "controllers": _read_text_one_line(cgroup_path / "cgroup.controllers"),
+        "parent_controllers": _read_text_one_line(parent / "cgroup.controllers"),
+        "subtree_control": _read_text_one_line(cgroup_path / "cgroup.subtree_control"),
+        "parent_subtree_control": _read_text_one_line(parent / "cgroup.subtree_control"),
+        "child_cgroup": _read_text_one_line(Path(f"/proc/{child_pid}/cgroup")),
+    }
+    return " ".join(f"{key}={_quote_detail(value)}" for key, value in fields.items())
+
+
+def _read_text_one_line(path: Path) -> str | None:
+    try:
+        text = path.read_text(encoding="utf-8").strip().replace("\n", "|")
+    except OSError:
+        return None
+    return text or "(empty)"
+
+
+def _quote_detail(value: str | None) -> str:
+    return "-" if value is None else repr(value)
 
 
 def _enable_cgroup_controller(cgroup_path: Path, controller: str) -> None:

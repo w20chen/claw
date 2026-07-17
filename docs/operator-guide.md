@@ -284,6 +284,12 @@ after updates so it forwards `CLAW_CGROUP_ROOT` into wrapped `exec` calls.
 If required mode reports `[Errno 13] Permission denied` while writing
 `cgroup.procs`, rerun the `echo "$$" | sudo tee .../cgroup.procs` delegation
 line in the same shell that starts `openclaw agent`.
+If required mode reports `[Errno 95] Operation not supported`, the current
+cgroup hierarchy does not support moving the tool process into the created
+sub-cgroup. This is a host cgroup delegation/topology issue, not a recorder
+sampling issue. Unset `CLAW_CGROUP_REQUIRED` to continue with PID process-tree
+monitoring, or choose a different delegated cgroup root that supports process
+migration.
 
 For cgroup troubleshooting, make fallback explicit:
 
