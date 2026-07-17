@@ -20,7 +20,7 @@ does not fabricate IDs.
 
 Tool request messages may include:
 
-- `operation_hint`: a privacy-preserving category derived from tool arguments,
+- `operation_hint`: a category derived from tool arguments,
   for example `pytest`, `grep`, or `git`. This lets the sidecar match
   agent-test-bench style `exec-*` profiles without transporting the full shell
   command.

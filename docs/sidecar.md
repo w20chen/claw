@@ -74,7 +74,7 @@ JSONL record per polling tick.
 Stored sample fields include:
 
 - `tool_call_id`, `tool_name`, and derived `operation`
-- `operation_hint`, a privacy-preserving command category such as `pytest`,
+- `operation_hint`, a command category such as `pytest`,
   `grep`, or `git`
 - user-visible `duration_ms` from the completion event
 - sidecar-observed `monitor_duration_ms`

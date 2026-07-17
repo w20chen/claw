@@ -59,7 +59,7 @@ HTML visualization | Remains in agent-test-bench.
 Benchmark/container orchestration | Remains in agent-test-bench and is not imported by the online sidecar.
 Agent scaffold / AgentLoop | Not imported. OpenClaw native hooks are the online integration point.
 Real-time OpenClaw tool monitoring | Implemented in the scheduler sidecar via `/v1/decisions/tool`, `/v1/events/tool-completed`, `/v1/tools/recent`, and Prometheus metrics.
-`exec` command classification | Ported into the scheduler as privacy-preserving `operation_hint` / `operation` matching so `exec` + `python -m pytest` can reuse `exec-pytest` profiles.
+`exec` command classification | Ported into the scheduler as `operation_hint` / `operation` matching so `exec` + `python -m pytest` can reuse `exec-pytest` profiles.
 
 ## Development Contract
 
@@ -70,7 +70,7 @@ For future agent-test-bench work, prefer exporting one or both of:
 
 The online sidecar should never import benchmark runners, container managers,
 AgentLoop classes, or visualization modules. That keeps production plugin
-behavior small, deterministic, and privacy-preserving while still letting the
+behavior small and deterministic while still letting the
 research repository feed it real workload measurements.
 
 The boundary is:

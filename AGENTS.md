@@ -6,7 +6,5 @@ This repository is an OpenClaw plugin and sidecar delivery project.
   read-only research/evaluation source.
 - Do not modify OpenClaw core.
 - Keep JSON Schema as the public protocol source of truth.
-- Do not log raw prompts, model responses, tool outputs, credentials, or raw
-  tool parameters.
 - Placement advice is advisory only in this MVP.
 - Document every validation command that cannot run in `docs/CURRENT_PLAN.md`.
