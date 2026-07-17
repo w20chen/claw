@@ -200,14 +200,19 @@ def _prepare_cgroup(
     mems: str | None,
     profiling: object,
 ) -> str | None:
-    if not _supports_posix_controls() or not _enabled(profiling, "enable_cgroup", True):
+    required = _env_enabled("CLAW_CGROUP_REQUIRED")
+    if not _supports_posix_controls():
+        if required:
+            raise RuntimeError("cgroup_unavailable: posix_controls_unsupported")
+        return _explicit_cgroup_path()
+    if not required and not _enabled(profiling, "enable_cgroup", True):
         return _explicit_cgroup_path()
     explicit = _explicit_cgroup_path()
     if explicit:
         return explicit
     root = os.environ.get("CLAW_CGROUP_ROOT")
     if not root:
-        if os.environ.get("CLAW_ENABLE_CGROUP") != "1":
+        if not required and os.environ.get("CLAW_ENABLE_CGROUP") != "1":
             return None
         root = "/sys/fs/cgroup/claw"
     try:

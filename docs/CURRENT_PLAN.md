@@ -89,7 +89,7 @@ Use `npm.cmd` on Windows PowerShell when `npm.ps1` is blocked.
 - Passed: `python3 -m pytest tests -q --basetemp .pytest-tmp-root`
   - 3 tests passed.
 - Passed: `cd services/scheduler && python3 -m pytest tests -q`
-  - 26 tests passed.
+  - 28 tests passed.
 - Passed: `python3 -m py_compile services\scheduler\src\agent_scheduler\llm_proxy.py services\scheduler\src\agent_scheduler\api\app.py services\scheduler\src\agent_scheduler\trace.py services\scheduler\src\agent_scheduler\config.py`
 - Passed: `python3 tools\inspect_trace.py tests\fixtures\agent_test_bench_trace.jsonl --all --details --width 100`
 - Passed: `python3 tools\inspect_trace.py tests\fixtures\agent_test_bench_trace.jsonl --all --details --timeline --width 100`

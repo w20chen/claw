@@ -285,7 +285,8 @@ export CLAW_CGROUP_REQUIRED=1
 ```
 
 With this set, `claw-launch` exits with a visible `cgroup_unavailable` error
-instead of silently falling back to PID monitoring.
+instead of silently falling back to PID monitoring. It also forces the launcher
+to try cgroup even if profiling metadata says cgroup is disabled.
 
 ## 9. Troubleshooting
 

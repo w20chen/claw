@@ -117,6 +117,35 @@ def test_launcher_can_require_cgroup(monkeypatch, tmp_path) -> None:
         )
 
 
+def test_launcher_required_cgroup_overrides_profiling_disable(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(launcher, "_supports_posix_controls", lambda: True)
+    monkeypatch.setenv("CLAW_CGROUP_ROOT", str(tmp_path))
+    monkeypatch.setenv("CLAW_CGROUP_REQUIRED", "1")
+    monkeypatch.delenv("CLAW_CGROUP_PATH", raising=False)
+
+    cgroup_path = launcher._prepare_cgroup(
+        "exec:1",
+        None,
+        None,
+        {"enable_cgroup": False},
+    )
+
+    assert cgroup_path == str(tmp_path / "exec_1")
+
+
+def test_launcher_required_cgroup_fails_without_posix(monkeypatch) -> None:
+    monkeypatch.setattr(launcher, "_supports_posix_controls", lambda: False)
+    monkeypatch.setenv("CLAW_CGROUP_REQUIRED", "1")
+
+    with pytest.raises(RuntimeError, match="posix_controls_unsupported"):
+        launcher._prepare_cgroup(
+            "exec:1",
+            None,
+            None,
+            {"enable_cgroup": True},
+        )
+
+
 def test_launcher_passes_placement_to_spawn(monkeypatch, tmp_path) -> None:
     posts: list[tuple[str, dict[str, Any]]] = []
 
