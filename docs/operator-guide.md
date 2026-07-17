@@ -286,7 +286,8 @@ export CLAW_CGROUP_REQUIRED=1
 
 With this set, `claw-launch` exits with a visible `cgroup_unavailable` error
 instead of silently falling back to PID monitoring. It also forces the launcher
-to try cgroup even if profiling metadata says cgroup is disabled.
+to try cgroup even if profiling metadata says cgroup is disabled, and verifies
+that the child process actually appears in `cgroup.procs`.
 
 ## 9. Troubleshooting
 

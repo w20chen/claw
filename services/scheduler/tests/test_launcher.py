@@ -146,6 +146,19 @@ def test_launcher_required_cgroup_fails_without_posix(monkeypatch) -> None:
         )
 
 
+def test_launcher_required_cgroup_verifies_child_membership(monkeypatch, tmp_path) -> None:
+    cgroup_path = tmp_path / "exec-1"
+    cgroup_path.mkdir()
+    (cgroup_path / "cgroup.procs").write_text("123\n", encoding="utf-8")
+    monkeypatch.setenv("CLAW_CGROUP_REQUIRED", "1")
+
+    with pytest.raises(RuntimeError, match="cgroup_join_missing"):
+        launcher._verify_child_cgroup(456, str(cgroup_path))
+
+    (cgroup_path / "cgroup.procs").write_text("456\n", encoding="utf-8")
+    launcher._verify_child_cgroup(456, str(cgroup_path))
+
+
 def test_launcher_passes_placement_to_spawn(monkeypatch, tmp_path) -> None:
     posts: list[tuple[str, dict[str, Any]]] = []
 

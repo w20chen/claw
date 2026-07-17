@@ -151,4 +151,5 @@ without any trusted scope are recorded as `attribution_status: "unattributed"`
 rather than misattributing sidecar process metrics to the tool.
 Set `CLAW_CGROUP_REQUIRED=1` while debugging if cgroup fallback should be a
 hard failure instead of a silent downgrade to PID monitoring. This required
-mode forces a cgroup attempt even if profiling metadata disables cgroup.
+mode forces a cgroup attempt even if profiling metadata disables cgroup and
+checks that the child process actually joined the cgroup.
