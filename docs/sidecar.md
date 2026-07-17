@@ -149,6 +149,9 @@ sampler then reads `cpu.stat`, `memory.current`, `io.stat`, and `cgroup.procs`
 directly. Without that cgroup path, the launcher registers a PID scope. Calls
 without any trusted scope are recorded as `attribution_status: "unattributed"`
 rather than misattributing sidecar process metrics to the tool.
+For unprivileged cgroup-v2 delegation, the process that starts OpenClaw should
+also be moved into the delegated root cgroup; otherwise the kernel can reject
+moving children into sub-cgroups with `Permission denied`.
 Set `CLAW_CGROUP_REQUIRED=1` while debugging if cgroup fallback should be a
 hard failure instead of a silent downgrade to PID monitoring. This required
 mode forces a cgroup attempt even if profiling metadata disables cgroup and

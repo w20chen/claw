@@ -169,6 +169,15 @@ def test_launcher_required_cgroup_reports_parent_join_failure(monkeypatch, tmp_p
         launcher._join_child_cgroup(456, str(cgroup_path))
 
 
+def test_launcher_cgroup_join_failure_falls_back_when_not_required(monkeypatch, tmp_path) -> None:
+    cgroup_path = tmp_path / "exec-1"
+    cgroup_path.mkdir()
+    monkeypatch.delenv("CLAW_CGROUP_REQUIRED", raising=False)
+    monkeypatch.setattr(launcher, "_write_file", lambda _path, _value: (_ for _ in ()).throw(OSError("blocked")))
+
+    assert launcher._join_child_cgroup(456, str(cgroup_path)) is False
+
+
 def test_launcher_passes_placement_to_spawn(monkeypatch, tmp_path) -> None:
     posts: list[tuple[str, dict[str, Any]]] = []
 

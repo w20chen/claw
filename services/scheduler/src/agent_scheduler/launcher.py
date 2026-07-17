@@ -56,7 +56,9 @@ def run_execution(endpoint: str, execution_id: str, token: str) -> int:
 
     child = _spawn_shell(command, cwd, cgroup_path=cgroup_path, affinity_cpus=affinity_cpus)
     try:
-        _join_child_cgroup(child.pid, cgroup_path)
+        if not _join_child_cgroup(child.pid, cgroup_path):
+            _cleanup_cgroup(cgroup_path)
+            cgroup_path = None
         _verify_child_cgroup(child.pid, cgroup_path)
     except Exception:
         _terminate_child_best_effort(child)
@@ -254,14 +256,16 @@ def _cleanup_cgroup(cgroup_path: str | None) -> None:
         pass
 
 
-def _join_child_cgroup(child_pid: int, cgroup_path: str | None) -> None:
+def _join_child_cgroup(child_pid: int, cgroup_path: str | None) -> bool:
     if not cgroup_path:
-        return
+        return False
     try:
         _write_file(Path(cgroup_path) / "cgroup.procs", str(child_pid))
+        return True
     except OSError as exc:
         if _env_enabled("CLAW_CGROUP_REQUIRED"):
             raise RuntimeError(f"cgroup_join_failed path={cgroup_path} child_pid={child_pid}: {exc}") from exc
+        return False
 
 
 def _verify_child_cgroup(child_pid: int, cgroup_path: str | None) -> None:

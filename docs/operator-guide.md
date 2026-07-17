@@ -266,10 +266,14 @@ root:
 
 ```bash
 sudo mkdir -p /sys/fs/cgroup/claw
-sudo chown "$USER":"$USER" /sys/fs/cgroup/claw
+sudo chown -R "$USER":"$USER" /sys/fs/cgroup/claw
+echo "$$" | sudo tee /sys/fs/cgroup/claw/cgroup.procs >/dev/null
 export CLAW_CGROUP_ROOT=/sys/fs/cgroup/claw
 ```
 
+The `tee` line moves the current shell into the delegated cgroup root. Without
+that, cgroup-v2 can reject moving child processes into sub-cgroups with
+`Permission denied` even when `/sys/fs/cgroup/claw` is owned by your user.
 Then rerun the OpenClaw task. `resource_usage.monitor_source` should become
 `cgroup-v2` when the launcher successfully registers a cgroup scope.
 If the trace still shows `attr=pid` or `monitor_source=psutil-process-tree`,
@@ -277,6 +281,9 @@ the task is still being monitored by PID process tree. That is usable, but it
 means either the OpenClaw/plugin process did not inherit `CLAW_CGROUP_ROOT`, or
 the launcher could not create/read the cgroup. Rebuild and relink the plugin
 after updates so it forwards `CLAW_CGROUP_ROOT` into wrapped `exec` calls.
+If required mode reports `[Errno 13] Permission denied` while writing
+`cgroup.procs`, rerun the `echo "$$" | sudo tee .../cgroup.procs` delegation
+line in the same shell that starts `openclaw agent`.
 
 For cgroup troubleshooting, make fallback explicit:
 
