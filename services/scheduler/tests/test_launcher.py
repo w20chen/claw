@@ -159,6 +159,16 @@ def test_launcher_required_cgroup_verifies_child_membership(monkeypatch, tmp_pat
     launcher._verify_child_cgroup(456, str(cgroup_path))
 
 
+def test_launcher_required_cgroup_reports_parent_join_failure(monkeypatch, tmp_path) -> None:
+    cgroup_path = tmp_path / "exec-1"
+    cgroup_path.mkdir()
+    monkeypatch.setenv("CLAW_CGROUP_REQUIRED", "1")
+    monkeypatch.setattr(launcher, "_write_file", lambda _path, _value: (_ for _ in ()).throw(OSError("blocked")))
+
+    with pytest.raises(RuntimeError, match="cgroup_join_failed"):
+        launcher._join_child_cgroup(456, str(cgroup_path))
+
+
 def test_launcher_passes_placement_to_spawn(monkeypatch, tmp_path) -> None:
     posts: list[tuple[str, dict[str, Any]]] = []
 

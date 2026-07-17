@@ -152,4 +152,5 @@ rather than misattributing sidecar process metrics to the tool.
 Set `CLAW_CGROUP_REQUIRED=1` while debugging if cgroup fallback should be a
 hard failure instead of a silent downgrade to PID monitoring. This required
 mode forces a cgroup attempt even if profiling metadata disables cgroup and
-checks that the child process actually joined the cgroup.
+checks that the child process actually joined the cgroup. Join failures are
+reported as `cgroup_join_failed` or `cgroup_join_missing`.

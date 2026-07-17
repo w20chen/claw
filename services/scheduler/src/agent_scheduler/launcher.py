@@ -55,7 +55,13 @@ def run_execution(endpoint: str, execution_id: str, token: str) -> int:
     affinity_cpus = parsed_affinity or None
 
     child = _spawn_shell(command, cwd, cgroup_path=cgroup_path, affinity_cpus=affinity_cpus)
-    _verify_child_cgroup(child.pid, cgroup_path)
+    try:
+        _join_child_cgroup(child.pid, cgroup_path)
+        _verify_child_cgroup(child.pid, cgroup_path)
+    except Exception:
+        _terminate_child_best_effort(child)
+        _cleanup_cgroup(cgroup_path)
+        raise
     _install_signal_forwarders(child)
     _post_json_best_effort(
         endpoint,
@@ -107,9 +113,7 @@ def _child_preexec(cgroup_path: str | None, affinity_cpus: set[int] | None):
         if cgroup_path:
             try:
                 _write_file(Path(cgroup_path) / "cgroup.procs", str(os.getpid()))
-            except OSError as exc:
-                if _env_enabled("CLAW_CGROUP_REQUIRED"):
-                    raise RuntimeError(f"cgroup_join_failed path={cgroup_path}: {exc}") from exc
+            except OSError:
                 pass
         if affinity_cpus and hasattr(os, "sched_setaffinity"):
             try:
@@ -250,6 +254,16 @@ def _cleanup_cgroup(cgroup_path: str | None) -> None:
         pass
 
 
+def _join_child_cgroup(child_pid: int, cgroup_path: str | None) -> None:
+    if not cgroup_path:
+        return
+    try:
+        _write_file(Path(cgroup_path) / "cgroup.procs", str(child_pid))
+    except OSError as exc:
+        if _env_enabled("CLAW_CGROUP_REQUIRED"):
+            raise RuntimeError(f"cgroup_join_failed path={cgroup_path} child_pid={child_pid}: {exc}") from exc
+
+
 def _verify_child_cgroup(child_pid: int, cgroup_path: str | None) -> None:
     if not cgroup_path or not _env_enabled("CLAW_CGROUP_REQUIRED"):
         return
@@ -260,6 +274,17 @@ def _verify_child_cgroup(child_pid: int, cgroup_path: str | None) -> None:
         raise RuntimeError(f"cgroup_verify_failed path={cgroup_path}: {exc}") from exc
     if child_pid not in pids:
         raise RuntimeError(f"cgroup_join_missing path={cgroup_path} child_pid={child_pid}")
+
+
+def _terminate_child_best_effort(child: subprocess.Popen[bytes]) -> None:
+    try:
+        child.terminate()
+        child.wait(timeout=1)
+    except Exception:
+        try:
+            child.kill()
+        except Exception:
+            pass
 
 
 def _enable_cgroup_controller(cgroup_path: Path, controller: str) -> None:
