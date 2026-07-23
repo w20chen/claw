@@ -22,8 +22,23 @@ from agent_scheduler.contracts.models import (
     ToolCompletedEvent,
 )
 from agent_scheduler.llm_proxy import proxy_chat_completions, proxy_models
+from agent_scheduler.monitoring.tool_runtime import ToolRuntimeSample
 from agent_scheduler.policies.base import SchedulingContext
 from agent_scheduler.security.auth import verify_bearer
+
+
+def _sample_summary(sample: ToolRuntimeSample) -> dict[str, object]:
+    """Convert a ToolRuntimeSample into a JSON-serializable summary dict."""
+    return {
+        "tool_call_id": sample.tool_call_id,
+        "tool_name": sample.tool_name,
+        "duration_ms": sample.duration_ms,
+        "resource_class": sample.resource_class,
+        "attribution_status": sample.attribution_status,
+        "target_pid": sample.target_pid,
+        "cpu_time_delta_s": sample.cpu_time_delta_s,
+        "rss_bytes_peak": sample.rss_bytes_peak,
+    }
 
 
 def create_app(state: AppState | None = None) -> FastAPI:
@@ -62,7 +77,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
         s: AppState = Depends(get_state),
         _: None = Depends(auth),
     ) -> dict[str, object]:
-        return {"samples": []}
+        return {"samples": s._recent_samples[:limit]}
 
     @app.get("/v1/models")
     @app.get("/models")
@@ -107,10 +122,18 @@ def create_app(state: AppState | None = None) -> FastAPI:
         s: AppState = Depends(get_state),
         _: None = Depends(auth),
     ) -> dict[str, bool]:
+        # Dedup: reject duplicate tool completions (same event_id)
+        if event.event_id in s._completed_tool_event_ids:
+            return {"stored": False}
+        s._completed_tool_event_ids.add(event.event_id)
+
         await s.leases.release(event.lease_id)
         sample = s.tool_monitor.complete(event)
         if sample is not None:
             s.metrics.observe_tool_runtime(sample)
+            s._recent_samples.insert(0, _sample_summary(sample))
+            if len(s._recent_samples) > s._max_recent_samples:
+                s._recent_samples.pop()
             if s.trace_writer is not None:
                 s.trace_writer.record_tool(event, sample)
         s.metrics.inc("scheduler_tool_completions_total")

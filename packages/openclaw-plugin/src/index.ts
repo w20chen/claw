@@ -55,6 +55,16 @@ function safeFilename(segment: string | null): string {
   return segment.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").slice(0, 64);
 }
 
+/**
+ * Get or create a trace writer for a run.
+ *
+ * Keys writers by runId (primary) or sessionId (fallback).
+ * NEVER uses plugin instanceId as a key to prevent cross-run
+ * accumulation in the same file.
+ *
+ * Returns null when neither runId nor sessionId is available
+ * (trace data cannot be attributed to a specific run/session).
+ */
 async function getRunWriter(
   traceDir: string,
   runId: string | null,
@@ -62,8 +72,18 @@ async function getRunWriter(
   agentId: string | null,
   logger: { warn(message: string, data?: unknown): void },
   flushSpanStart: boolean,
-): Promise<TraceWriter> {
-  const key = runId ?? instanceId;
+): Promise<TraceWriter | null> {
+  const key = runId ?? sessionId;
+  if (!key) {
+    logger.warn("trace: skipping write, no run_id or session_id available", {
+      runId,
+      sessionId,
+      agentId,
+      instanceId,
+    });
+    return null;
+  }
+
   const existing = runWriters.get(key);
   if (existing) return existing;
 
@@ -144,11 +164,11 @@ export default definePluginEntry({
   registry = new SpanRegistry();
   const traceCfg = config.trace;
 
-  // ── Debug: dump OpenClaw hook payload keys (once per plugin load) ──
-  let debugDumped = false;
+  // ── Debug: dump OpenClaw hook payload keys (once per hook type) ──
+  const debugDumped = new Set<string>();
   function dumpHookShape(event: unknown, context: unknown, hookName: string): void {
-    if (debugDumped) return;
-    debugDumped = true;
+    if (debugDumped.has(hookName)) return;
+    debugDumped.add(hookName);
     const evtKeys = isRecord(event) ? Object.keys(event as Record<string, unknown>) : [];
     const ctxKeys = isRecord(context) ? Object.keys(context as Record<string, unknown>) : [];
     logger.warn(`[trace debug] ${hookName} hook shape`, {
@@ -159,6 +179,8 @@ export default definePluginEntry({
       event_agent_id: extractString(event, ["agent_id", "agentId"]),
       event_tool_call_id: extractString(event, ["tool_call_id", "toolCallId", "id"]),
       event_tool_name: extractString(event, ["tool_name", "toolName", "name"]),
+      event_call_id: extractString(event, ["call_id", "callId", "id"]),
+      event_model: extractString(event, ["model"]),
       context_keys: ctxKeys,
       context_runId: extractString(context, ["runId", "run_id"]),
       context_sessionId: extractString(context, ["sessionId", "session_id"]),
@@ -173,10 +195,11 @@ export default definePluginEntry({
     dumpHookShape(event, context, "before_tool_call");
     const toolName = extractString(event, ["tool_name", "toolName", "name"]) ?? "unknown";
     const toolCallId = extractString(event, ["tool_call_id", "toolCallId", "id"]);
-    const runId = extractString(event, ["run_id", "runId"]) ?? extractString(context, ["runId", "run_id"]) ?? instanceId;
+    // Use OpenClaw-provided IDs only. No self-generated fallback.
+    const runId = extractString(event, ["run_id", "runId"]) ?? extractString(context, ["runId", "run_id"]);
     const sessionId = extractString(event, ["session_id", "sessionId"]) ?? extractString(context, ["sessionId", "session_id"]);
     const agentId = extractString(event, ["agent_id", "agentId"]) ?? extractString(context, ["agentId", "agent_id"]);
-    const traceId = runId;
+    const traceId = runId ?? sessionId ?? "unknown-run";
 
     // Resolve parent span
     let parentSpanId: string | null = null;
@@ -248,8 +271,11 @@ export default definePluginEntry({
           reason: correlationReason,
         } : undefined,
       };
-      getRunWriter(traceCfg.trace_dir, runId, sessionId, agentId, logger, traceCfg.flush_span_start).then((w) => w.writeRecord(spanStart));
-      if (registry) registry.markStartWritten(traceId, spanId);
+      const w = await getRunWriter(traceCfg.trace_dir, runId, sessionId, agentId, logger, traceCfg.flush_span_start);
+      if (w) {
+        w.writeRecord(spanStart);
+        if (registry) registry.markStartWritten(traceId, spanId);
+      }
     }
 
     // Original sidecar logic
@@ -294,10 +320,12 @@ export default definePluginEntry({
   // ── after_tool_call ───────────────────────────────────────────────
 
   api.on("after_tool_call", async (event: unknown, context: unknown) => {
+    dumpHookShape(event, context, "after_tool_call");
     const toolName = extractString(event, ["tool_name", "toolName", "name"]) ?? "unknown";
     const toolCallId = extractString(event, ["tool_call_id", "toolCallId", "id"]);
-    const runId = extractString(event, ["run_id", "runId"]) ?? extractString(context, ["runId", "run_id"]) ?? instanceId;
-    const traceId = runId;
+    // Use OpenClaw-provided IDs only. No self-generated fallback.
+    const runId = extractString(event, ["run_id", "runId"]) ?? extractString(context, ["runId", "run_id"]);
+    const traceId = runId ?? extractString(event, ["session_id", "sessionId"]) ?? extractString(context, ["sessionId", "session_id"]) ?? "unknown-run";
     const spanId = toolCallId ?? traceId;
 
     const endWall = wallClockNowNs();
@@ -424,15 +452,18 @@ export default definePluginEntry({
     // Write span_end
     if (traceCfg.trace_dir) {
       const seqNo = activeSpan?.sequenceNo ?? 0;
+      // Prefer span values; fall back to event/context for session_id, agent_id
+      const finalSessionId = activeSpan?.sessionId ?? extractString(event, ["session_id", "sessionId"]) ?? extractString(context, ["sessionId", "session_id"]);
+      const finalAgentId = activeSpan?.agentId ?? extractString(event, ["agent_id", "agentId"]) ?? extractString(context, ["agentId", "agent_id"]);
       const spanEnd: SpanEndRecord = {
         schema_version: TRACE_SCHEMA_VERSION,
         record_type: "span_end",
         trace_id: traceId,
         span_id: spanId,
         parent_span_id: parentSpanId,
-        session_id: activeSpan?.sessionId ?? completion.session_id,
+        session_id: finalSessionId,
         run_id: runId,
-        agent_id: activeSpan?.agentId ?? completion.agent_id,
+        agent_id: finalAgentId,
         sequence_no: seqNo,
         kind: "tool",
         name: toolName,
@@ -458,7 +489,8 @@ export default definePluginEntry({
           reason: "span_start_not_found",
         } : undefined,
       };
-      getRunWriter(traceCfg.trace_dir, runId, activeSpan?.sessionId ?? null, activeSpan?.agentId ?? null, logger, traceCfg.flush_span_start).then((w) => w.writeRecord(spanEnd));
+      const w = await getRunWriter(traceCfg.trace_dir, runId, finalSessionId, finalAgentId, logger, traceCfg.flush_span_start);
+      if (w) w.writeRecord(spanEnd);
     }
   });
 
@@ -469,12 +501,13 @@ export default definePluginEntry({
   api.on("model_call_started", async (event: unknown, context: unknown) => {
     dumpHookShape(event, context, "model_call_started");
     const callId = extractString(event, ["call_id", "callId", "id"]);
+    // Use OpenClaw-provided IDs only. No self-generated fallback.
     const runId = extractString(event, ["run_id", "runId"]) ?? extractString(context, ["runId", "run_id"]);
     const sessionId = extractString(event, ["session_id", "sessionId"]) ?? extractString(context, ["sessionId", "session_id"]);
     const agentId = extractString(event, ["agent_id", "agentId"]) ?? extractString(context, ["agentId", "agent_id"]);
     const model = extractString(event, ["model"]) ?? "unknown-model";
     const provider = extractString(event, ["provider"]);
-    const traceId = runId ?? instanceId;
+    const traceId = runId ?? sessionId ?? "unknown-run";
 
     llmSeqCounter++;
     const spanId = callId ?? `${traceId}:model:${llmSeqCounter}`;
@@ -527,10 +560,11 @@ export default definePluginEntry({
           execution_id: null,
         },
       };
-      getRunWriter(traceCfg.trace_dir, runId, sessionId, agentId, logger, traceCfg.flush_span_start).then((w) => {
+      const w = await getRunWriter(traceCfg.trace_dir, runId, sessionId, agentId, logger, traceCfg.flush_span_start);
+      if (w) {
         w.writeRecord(spanStart);
         if (registry) registry.markStartWritten(traceId, spanId);
-      });
+      }
     }
 
     // Original sidecar logic
@@ -546,9 +580,11 @@ export default definePluginEntry({
   // ── model_call_ended ──────────────────────────────────────────────
 
   api.on("model_call_ended", async (event: unknown, context: unknown) => {
+    dumpHookShape(event, context, "model_call_ended");
     const callId = extractString(event, ["call_id", "callId", "id"]);
-    const runId = extractString(event, ["run_id", "runId"]) ?? extractString(context, ["runId", "run_id"]) ?? instanceId;
-    const traceId = runId;
+    // Use OpenClaw-provided IDs only. No self-generated fallback.
+    const runId = extractString(event, ["run_id", "runId"]) ?? extractString(context, ["runId", "run_id"]);
+    const traceId = runId ?? extractString(event, ["session_id", "sessionId"]) ?? extractString(context, ["sessionId", "session_id"]) ?? "unknown-run";
 
     // Look up the span_id from the started event
     let spanId = callId ?? "";
@@ -598,15 +634,18 @@ export default definePluginEntry({
     // Write span_end for LLM
     if (traceCfg.trace_dir) {
       const hookOutput = extractModelOutput(event);
+      // Prefer span values; fall back to event/context for session_id, agent_id
+      const finalSessionId = activeSpan?.sessionId ?? extractString(event, ["session_id", "sessionId"]) ?? extractString(context, ["sessionId", "session_id"]);
+      const finalAgentId = activeSpan?.agentId ?? extractString(event, ["agent_id", "agentId"]) ?? extractString(context, ["agentId", "agent_id"]);
       const spanEnd: SpanEndRecord = {
         schema_version: TRACE_SCHEMA_VERSION,
         record_type: "span_end",
         trace_id: traceId,
         span_id: spanId,
         parent_span_id: null,
-        session_id: activeSpan?.sessionId ?? null,
+        session_id: finalSessionId,
         run_id: runId,
-        agent_id: activeSpan?.agentId ?? null,
+        agent_id: finalAgentId,
         sequence_no: activeSpan?.sequenceNo ?? 0,
         kind: "llm",
         name: model,
@@ -646,7 +685,8 @@ export default definePluginEntry({
           reason: "span_start_not_found",
         } : undefined,
       };
-      getRunWriter(traceCfg.trace_dir, runId, activeSpan?.sessionId ?? null, activeSpan?.agentId ?? null, logger, traceCfg.flush_span_start).then((w) => w.writeRecord(spanEnd));
+      const w = await getRunWriter(traceCfg.trace_dir, runId, finalSessionId, finalAgentId, logger, traceCfg.flush_span_start);
+      if (w) w.writeRecord(spanEnd);
     }
 
     // Original sidecar logic

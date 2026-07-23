@@ -87,14 +87,14 @@ Use `npm.cmd` on Windows PowerShell when `npm.ps1` is blocked.
 
 - Passed: `python3 tools\validate_contracts.py`
 - Passed: `python3 -m pytest tests -q --basetemp .pytest-tmp-root`
-  - 3 tests passed.
+  - 33 passed, 1 xfail (Windows: `cpu_time_s` is None due to missing process sampling).
 - Passed: `cd services/scheduler && python3 -m pytest tests -q`
-  - 31 tests passed.
+  - 33 passed, 1 xfail (same Windows limitation).
 - Passed: `python3 -m py_compile services\scheduler\src\agent_scheduler\llm_proxy.py services\scheduler\src\agent_scheduler\api\app.py services\scheduler\src\agent_scheduler\trace.py services\scheduler\src\agent_scheduler\config.py`
 - Passed: `python3 tools\inspect_trace.py tests\fixtures\agent_test_bench_trace.jsonl --all --details --width 100`
 - Passed: `python3 tools\inspect_trace.py tests\fixtures\agent_test_bench_trace.jsonl --all --details --timeline --width 100`
 - Passed: `cd packages/openclaw-plugin && npm.cmd test`
-  - 6 Node tests passed.
+  - 33 Node tests passed (2026-07-23, after trace writer key fix + Python sidecar fix).
 - Passed: `cd packages/openclaw-plugin && npm.cmd run typecheck`
 
 ## Known Environment Notes

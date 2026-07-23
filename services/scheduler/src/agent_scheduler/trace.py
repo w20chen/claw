@@ -34,10 +34,30 @@ class AgentTestBenchTraceWriter:
         self._recent_proxy_calls: list[dict[str, Any]] = []
         self._seq_counters: dict[str, int] = {}
         self._files: dict[str, Path] = {}
+        self._metadata_written: set[str] = set()  # track files that already have metadata
         self.trace_dir.mkdir(parents=True, exist_ok=True)
 
-    def _file_for_run(self, run_id: str | None, session_id: str | None, agent_id: str | None) -> Path:
-        key = run_id or self._instance_id
+    def _file_for_run(self, run_id: str | None, session_id: str | None, agent_id: str | None) -> Path | None:
+        """Return the trace file for a run.
+
+        Keys writers by run_id (primary) or session_id (fallback).
+        Uses instance_id only as a last-resort key to prevent data loss,
+        but logs a warning since it can cause cross-run accumulation.
+
+        Returns None when no identifiable key is available at all.
+        """
+        key = run_id or session_id
+        if not key:
+            # Last resort: instance_id. Log a warning so operators
+            # can detect when the plugin isn't sending run_id/session_id.
+            import logging
+            _log = logging.getLogger(__name__)
+            _log.warning(
+                "trace: no run_id or session_id, falling back to instance_id "
+                "(may cause cross-run accumulation). run_id=%s session_id=%s agent_id=%s",
+                run_id, session_id, agent_id,
+            )
+            key = self._instance_id
         if key in self._files:
             return self._files[key]
         agent = _safe_filename(agent_id)
@@ -301,9 +321,11 @@ class AgentTestBenchTraceWriter:
         self._remember_proxy_call(record)
 
     def _ensure_metadata(self, filepath: Path) -> None:
-        # Truncate if file already exists from a previous run
-        if filepath.exists() and filepath.stat().st_size > 0:
-            filepath.unlink()
+        """Write metadata once per file. Never truncates existing data."""
+        key = str(filepath)
+        if key in self._metadata_written:
+            return
+        self._metadata_written.add(key)
         self._append(filepath, self._metadata_record())
 
     def _append(self, filepath: Path, record: dict[str, Any]) -> None:

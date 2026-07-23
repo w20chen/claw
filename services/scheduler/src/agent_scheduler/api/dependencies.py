@@ -26,6 +26,9 @@ class AppState:
     metrics: Metrics
     topology: dict
     trace_writer: AgentTestBenchTraceWriter
+    _completed_tool_event_ids: set[str]  # dedup: track completed tool event_ids
+    _recent_samples: list[dict[str, object]]  # recent tool runtime samples for /v1/tools/recent
+    _max_recent_samples: int = 200  # max samples to keep in memory
 
 
 def build_state(config: SchedulerConfig | None = None) -> AppState:
@@ -50,4 +53,6 @@ def build_state(config: SchedulerConfig | None = None) -> AppState:
         metrics=Metrics(),
         topology=read_topology(),
         trace_writer=AgentTestBenchTraceWriter(cfg.trace_dir),
+        _completed_tool_event_ids=set(),
+        _recent_samples=[],
     )
