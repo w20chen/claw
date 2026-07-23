@@ -95,35 +95,65 @@ def _parse_list_output(output: str, sample: int = 0) -> list[dict[str, Any]]:
 
 
 def _load_from_huggingface(sample: int = 0) -> list[dict[str, Any]]:
-    """Load tasks directly from HuggingFace datasets."""
+    """Load tasks directly from HuggingFace datasets via a subprocess.
+
+    Uses a subprocess to avoid in-process import conflicts with the
+    ``datasets`` package (which pulls in heavy deps like pyarrow, pandas).
+    """
+    code = f'''
+import json, sys
+try:
+    from datasets import load_dataset
+except ImportError as e:
+    print(json.dumps({{"error": f"Cannot import datasets: {{e}}. Install: pip install datasets"}}))
+    sys.exit(1)
+
+ds = load_dataset("{HF_DATASET}", split="{HF_SPLIT}")
+tasks = []
+for i, row in enumerate(ds):
+    if {sample} > 0 and i >= {sample}:
+        break
+    task = dict(row)
+    tasks.append({{
+        "instance_id": str(task.get("instance_id", "")),
+        "image": str(task.get("docker_image", "")),
+        "problem_statement": str(task.get("problem_statement", "")),
+        "repo": str(task.get("repo", "")),
+        "base_commit": str(task.get("base_commit", "")),
+        "FAIL_TO_PASS": task.get("FAIL_TO_PASS", []),
+        "PASS_TO_PASS": task.get("PASS_TO_PASS", []),
+    }})
+print(json.dumps(tasks, ensure_ascii=False))
+'''
+    _log(f"Downloading {HF_DATASET} (split={HF_SPLIT}) via subprocess...")
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        stdout = result.stdout.strip()
+        # Try to extract a JSON error message
+        try:
+            err_data = json.loads(stdout)
+            msg = err_data.get("error", stdout or stderr)
+        except (json.JSONDecodeError, TypeError):
+            msg = stderr or stdout or "unknown error"
+        raise RuntimeError(f"Failed to load dataset: {msg}")
+
     try:
-        from datasets import load_dataset  # type: ignore[import-untyped]
-    except ImportError:
-        raise ImportError(
-            "The 'datasets' package is required to download tasks from HuggingFace. "
-            "Install it with: pip install datasets"
+        tasks_raw = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        raise RuntimeError(
+            f"Failed to parse dataset output. stderr: {result.stderr[:500]}"
         )
 
-    _log(f"Downloading {HF_DATASET} (split={HF_SPLIT})...")
-    ds = load_dataset(HF_DATASET, split=HF_SPLIT)
     tasks: list[dict[str, Any]] = []
-    for row in ds:
-        task = dict(row)
-        # Normalize field names for runner.py compatibility
-        task_out: dict[str, Any] = {
-            "instance_id": str(task.get("instance_id", "")),
-            "image": str(task.get("docker_image", "")),
-            "problem_statement": str(task.get("problem_statement", "")),
-            "repo": str(task.get("repo", "")),
-            "base_commit": str(task.get("base_commit", "")),
-        }
-        # Preserve additional fields that may be useful
-        for key in ("FAIL_TO_PASS", "PASS_TO_PASS", "install_config", "version"):
-            if key in task:
-                task_out[key] = task[key]
-        tasks.append(task_out)
-        if sample > 0 and len(tasks) >= sample:
-            break
+    for raw in tasks_raw:
+        if isinstance(raw, dict):
+            tasks.append(raw)
 
     _log(f"Downloaded {len(tasks)} tasks from HuggingFace")
     return tasks
@@ -235,12 +265,12 @@ def main() -> None:
         )
         try:
             tasks = discover_from_agent_test_bench(bench_root, sample=args.sample)
-        except (FileNotFoundError, ImportError) as exc:
+        except (FileNotFoundError, ImportError, RuntimeError) as exc:
             _log(f"[warn] Cannot load from agent-test-bench: {exc}")
             _log("[warn] Trying direct HuggingFace download...")
             try:
                 tasks = _load_from_huggingface(sample=args.sample)
-            except ImportError as exc2:
+            except (ImportError, RuntimeError) as exc2:
                 _log(f"[error] {exc2}")
                 _log("[error] Cannot discover tasks. Options:")
                 _log("[error]   1. pip install datasets  (download from HuggingFace)")
