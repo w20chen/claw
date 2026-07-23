@@ -28,11 +28,21 @@ idempotent keys so duplicate events do not crash the service.
 ## LLM Proxy
 
 The sidecar includes an OpenAI-compatible proxy and this is the default path
-for complete LLM trace capture. Configure OpenClaw's provider base URL to:
+for complete LLM trace capture. The validated OpenClaw setup is to onboard an
+OpenAI-compatible local provider with `vllm` mode and point its custom base URL
+at the sidecar:
 
-```text
-http://127.0.0.1:8765/v1
+```bash
+export DEEPSEEK_API_KEY='<your-deepseek-api-key>'
+openclaw onboard --non-interactive \
+  --mode local \
+  --auth-choice vllm \
+  --custom-base-url 'http://127.0.0.1:8765/v1' \
+  --custom-api-key "$DEEPSEEK_API_KEY" \
+  --custom-model-id 'deepseek-v4-flash'
 ```
+
+Use the model as `vllm/deepseek-v4-flash`.
 
 DeepSeek is the built-in upstream default. For a different OpenAI-compatible
 provider, configure the real upstream provider on the sidecar:
@@ -48,11 +58,34 @@ sidecar proxy is not receiving LLM traffic yet.
 The proxy forwards OpenClaw's `Authorization` header by default, so do not
 duplicate API keys in sidecar config unless OpenClaw does not send auth to the
 proxy. Use `AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY` only as an explicit override.
+For the `vllm` proxy-to-DeepSeek setup, setting this override in `.env` is the
+most explicit option:
+
+```bash
+AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL=https://api.deepseek.com
+AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY=<your-deepseek-api-key>
+```
+
+Restart the sidecar after editing `.env`.
 
 The proxy forwards `/v1/models` and `/v1/chat/completions` to the upstream
 provider. Non-streaming and streaming chat completions are recorded as
 `llm_call` actions in `trace.jsonl`, including `messages_in`, reconstructed
 `content`, `raw_request`, and `raw_response`.
+
+When the proxy is working, OpenClaw logs show:
+
+```text
+url=http://127.0.0.1:8765/v1/chat/completions
+```
+
+The sidecar writes these default files relative to the repository root when
+using `.env.example`:
+
+- `data/openclaw-trace.sqlite3`: SQLite persistence for sidecar state,
+  decisions, completions, model events, and runtime samples.
+- `data/trace.jsonl`: append-only trace with `trace_metadata`, `llm_call`, and
+  `tool_exec` records.
 
 ## Real-time Tool Monitoring
 

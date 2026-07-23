@@ -10,8 +10,8 @@ The project boundary is intentionally narrow:
 - No OpenClaw core changes.
 - No `agent-test-bench` runtime import.
 - JSON Schema under `contracts/` is the protocol source of truth.
-- Full LLM trace capture uses the sidecar LLM proxy. Raw tool trace capture is
-  opt-in with plugin `recordRawTrace=true`.
+- Full LLM trace capture uses the sidecar LLM proxy. Tool args/results are
+  recorded by default through plugin `recordRawTrace=true`.
 
 ## What Works Now
 
@@ -81,19 +81,24 @@ cd services/scheduler
 python3 -m agent_scheduler.main --host 127.0.0.1 --port 8765
 ```
 
-Configure your OpenClaw model provider base URL to the sidecar proxy:
+Configure an OpenClaw OpenAI-compatible local provider to use the sidecar
+proxy. The validated path uses OpenClaw's `vllm` onboarding mode with the
+sidecar as the custom base URL:
 
 ```bash
-http://127.0.0.1:8765/v1
+export DEEPSEEK_API_KEY='<your-deepseek-api-key>'
+openclaw onboard --non-interactive \
+  --mode local \
+  --auth-choice vllm \
+  --custom-base-url 'http://127.0.0.1:8765/v1' \
+  --custom-api-key "$DEEPSEEK_API_KEY" \
+  --custom-model-id 'deepseek-v4-flash'
 ```
 
-The proxy forwards OpenClaw's `Authorization` header by default, so provider
-keys already stored by OpenClaw do not need to be duplicated in `.env`.
-DeepSeek's upstream URL is the built-in default; edit `.env` only for another
-OpenAI-compatible upstream.
-If OpenClaw logs still show requests going directly to
-`https://api.deepseek.com/...`, the proxy is not in the path yet and full LLM
-messages will not appear in `trace.jsonl`.
+DeepSeek's upstream URL is the built-in sidecar default. If OpenClaw sends a
+placeholder or local-provider key that DeepSeek will not accept, set
+`AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY` in `.env` and restart the sidecar; that
+sidecar key overrides OpenClaw's forwarded `Authorization` header.
 
 Link the plugin:
 
@@ -132,7 +137,7 @@ Run a real OpenClaw task and inspect outputs:
 
 ```bash
 openclaw models list
-export OPENCLAW_TEST_MODEL='<provider/model-from-openclaw-models-list>'
+export OPENCLAW_TEST_MODEL='vllm/deepseek-v4-flash'
 openclaw agent --local --agent main --model "$OPENCLAW_TEST_MODEL" \
   --message 'Use the shell to run: python3 -c "from pathlib import Path; import hashlib, math, os, time; p=Path(\"openclaw_trace_probe.bin\"); blob=bytearray(os.urandom(16*1024*1024)); total=sum(math.sqrt(i) for i in range(2000000)); digest=hashlib.sha256(blob).hexdigest()[:16]; p.write_bytes(blob); data=p.read_bytes(); time.sleep(0.5); print(\"heavy-ok\", len(data), int(total), digest)". Then summarize the result.'
 
@@ -142,6 +147,20 @@ tail -n 20 data/trace.jsonl
 python3 tools/inspect_trace.py data/trace.jsonl --tail 20 --details
 python3 tools/inspect_trace.py data/trace.jsonl --type tool_exec --tail 10 --details --timeline
 ```
+
+OpenClaw logs must show model traffic going to
+`http://127.0.0.1:8765/v1/chat/completions`. If they show
+`https://api.deepseek.com/chat/completions`, the selected model is bypassing the
+proxy and full LLM input/output will not be recorded.
+
+The default run creates:
+
+- `data/openclaw-trace.sqlite3`: sidecar SQLite persistence for tool/model
+  events, decisions, completions, and runtime samples.
+- `data/trace.jsonl`: live agent-test-bench v5-shaped trace records. It
+  includes `llm_call` records with `messages_in`, `content`, `raw_request`,
+  and `raw_response` when the proxy path is used, plus `tool_exec` records
+  with `tool_args`, `tool_result`, and `resource_usage`.
 
 PowerShell note: use `npm.cmd` and `openclaw.cmd` if `.ps1` shims are blocked.
 
@@ -167,7 +186,7 @@ Plugin:
 - `executionBackend`: `hook-only`, `marker`, or `managed-wrapper`.
 - `launcherPath`: path to `claw-launch` for `managed-wrapper`.
 - `securityBoundaryAccepted`: required for `managed-wrapper`.
-- `recordRawTrace`: set `true` to record visible OpenClaw tool hook
+- `recordRawTrace`: defaults to `true`; records visible OpenClaw tool hook
   args/results into `trace.jsonl`.
 
 ## Docs

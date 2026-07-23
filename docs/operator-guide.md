@@ -25,9 +25,9 @@ For a real OpenClaw run, the sidecar writes `trace.jsonl` records like:
 ```
 
 The default full-trace path uses the sidecar as an OpenAI-compatible LLM proxy.
-Configure OpenClaw's model provider base URL to `http://127.0.0.1:8765/v1`,
-and configure the sidecar's upstream base URL to the real provider. Then the
-sidecar records full LLM request messages and response content.
+Onboard an OpenClaw OpenAI-compatible local provider with `vllm` mode and set
+its custom base URL to `http://127.0.0.1:8765/v1`. Then the sidecar records
+full LLM request messages and response content.
 
 `recordRawTrace: true` is still important for tool trace capture. It tells the
 plugin to send hook-visible tool args/results and raw hook payloads to the
@@ -167,12 +167,14 @@ python3 -m agent_scheduler.main --host 127.0.0.1 --port 8765
 
 The sidecar loads `.env` automatically from the repository root. The default
 `.env.example` writes to `data/openclaw-trace.sqlite3` and `data/trace.jsonl`.
-DeepSeek is the built-in upstream default, so you do not need to set its URL.
-Do not duplicate the API key if OpenClaw already stores it; the proxy forwards
-OpenClaw's `Authorization` header. Set `AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL`
-only for another OpenAI-compatible upstream, and set
-`AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY` only if OpenClaw does not send auth to
-the proxy.
+DeepSeek is the built-in upstream default. For the most explicit proxy setup,
+put the DeepSeek key in `.env` so the sidecar always sends the correct upstream
+authorization:
+
+```bash
+AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL=https://api.deepseek.com
+AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY=<your-deepseek-api-key>
+```
 
 DeepSeek's built-in default is `https://api.deepseek.com`. Do not add `/v1`
 unless your chosen upstream actually expects it.
@@ -184,10 +186,16 @@ curl http://127.0.0.1:8765/health/live
 curl http://127.0.0.1:8765/health/ready
 ```
 
-Configure OpenClaw's provider base URL to the sidecar proxy:
+Configure OpenClaw's local OpenAI-compatible provider to use the sidecar proxy:
 
-```text
-http://127.0.0.1:8765/v1
+```bash
+export DEEPSEEK_API_KEY='<your-deepseek-api-key>'
+openclaw onboard --non-interactive \
+  --mode local \
+  --auth-choice vllm \
+  --custom-base-url 'http://127.0.0.1:8765/v1' \
+  --custom-api-key "$DEEPSEEK_API_KEY" \
+  --custom-model-id 'deepseek-v4-flash'
 ```
 
 For OpenAI-compatible providers, the sidecar exposes `/v1/models` and
@@ -215,7 +223,7 @@ Choose a model that your OpenClaw install can actually run:
 ```bash
 openclaw models list
 openclaw models status
-export OPENCLAW_TEST_MODEL='<provider/model-from-openclaw-models-list>'
+export OPENCLAW_TEST_MODEL='vllm/deepseek-v4-flash'
 ```
 
 Run a task that forces a shell tool call:
@@ -229,6 +237,15 @@ openclaw agent --local --agent main --model "$OPENCLAW_TEST_MODEL" \
 This should create a real OpenClaw model turn and a real OpenClaw `exec` tool
 call with visible CPU, memory, and disk activity. The plugin observes those
 hooks and the sidecar writes the trace.
+
+Confirm the OpenClaw log shows:
+
+```text
+url=http://127.0.0.1:8765/v1/chat/completions
+```
+
+If it shows `https://api.deepseek.com/chat/completions`, the run used the
+direct DeepSeek provider instead of the proxy provider.
 
 ## 7. Inspect The Real Trace
 
@@ -258,6 +275,14 @@ You are looking for:
 - `resource_usage.timeline`, a compact list of sampled points attached to the
   final tool action. Timeline I/O and network columns are per-interval rates,
   not raw cumulative kernel counters.
+
+The default run creates or appends these files under `~/claw/data`:
+
+- `openclaw-trace.sqlite3`: SQLite persistence used by the sidecar for
+  decisions, completions, model events, and resource samples.
+- `trace.jsonl`: append-only trace. Proxy-backed `llm_call` records contain
+  `messages_in`, `content`, `raw_request`, and `raw_response`; `tool_exec`
+  records contain `tool_args`, `tool_result`, and `resource_usage`.
 
 ## 8. Optional cgroup Scope
 
