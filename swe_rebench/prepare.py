@@ -183,32 +183,16 @@ openclaw --help 2>&1 | head -60 > "$TRACE_DIR/openclaw-help.txt" || true
 if [ -n "${PROBLEM_STATEMENT:-}" ]; then
     echo "$PROBLEM_STATEMENT" > /tmp/problem_statement.txt
 
-    # Try each known agent invocation pattern.
-    # Save stderr for each attempt to help debug.
-    AGENT_RUN=0
-    for _cmd in agent chat task; do
-        if openclaw "$_cmd" --help >/dev/null 2>&1; then
-            AGENT_RUN=1
-            echo "[claw] using: openclaw $_cmd"
-            openclaw "$_cmd" \
-                --prompt-file /tmp/problem_statement.txt \
-                --model "__MODEL_FULL__" \
-                --max-turns __MAX_TURNS__ \
-                --allowed-tools "exec,read,write,edit,grep,glob,bash,ls" \
-                __EXTRA__ 2>"$TRACE_DIR/agent-stderr.txt" || AGENT_EXIT=$?
-            break
-        fi
-    done
-
-    if [ "$AGENT_RUN" -eq 0 ]; then
-        # Fallback 1: openclaw with no subcommand, prompt via stdin
-        echo "[claw] trying: openclaw < prompt (stdin mode)"
-        openclaw \
-            --model "__MODEL_FULL__" \
-            --max-turns __MAX_TURNS__ \
-            --allowed-tools "exec,read,write,edit,grep,glob,bash,ls" \
-            __EXTRA__ < /tmp/problem_statement.txt 2>"$TRACE_DIR/agent-stderr.txt" || AGENT_EXIT=$?
-    fi
+    # openclaw agent --local: runs embedded agent (no Gateway needed).
+    # Prompt is a positional argument, NOT --prompt-file.
+    echo "[claw] running: openclaw agent --local"
+    openclaw agent --local \
+        --model "__MODEL_FULL__" \
+        --max-turns __MAX_TURNS__ \
+        --allowed-tools "exec,read,write,edit,grep,glob,bash,ls" \
+        __EXTRA__ \
+        "$(cat /tmp/problem_statement.txt)" \
+        2>"$TRACE_DIR/agent-stderr.txt" || AGENT_EXIT=$?
 else
     echo "[claw] WARNING: PROBLEM_STATEMENT not set"
     bash "$CLAW_ROOT/run_agent.sh" || AGENT_EXIT=$?
@@ -385,18 +369,12 @@ _RUN_AGENT_TEMPLATE = r"""#!/bin/bash
 set -euo pipefail
 echo "[claw] running agent (fallback)..."
 echo "[claw] TASK_INSTANCE_ID=${TASK_INSTANCE_ID:-unknown}"
-for _cmd in agent chat task; do
-    if openclaw "$_cmd" --help &>/dev/null; then
-        echo "[claw] using: openclaw $_cmd"
-        exec openclaw "$_cmd" \
-            --model "__MODEL_FULL__" \
-            --max-turns __MAX_TURNS__ \
-            --allowed-tools "exec,read,write,edit,grep,glob,bash,ls" \
-            __EXTRA__
-    fi
-done
-echo "[claw] FATAL: no known openclaw agent subcommand found"
-exit 1
+exec openclaw agent --local \
+    --model "__MODEL_FULL__" \
+    --max-turns __MAX_TURNS__ \
+    --allowed-tools "exec,read,write,edit,grep,glob,bash,ls" \
+    __EXTRA__ \
+    "${PROBLEM_STATEMENT:-Solve the task.}"
 """
 
 
