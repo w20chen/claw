@@ -24,7 +24,7 @@ export default definePluginEntry({
       reportTimeoutMs: {type: "integer", default: 800, minimum: 1},
       failOpen: {type: "boolean", default: true},
       sendRawParams: {type: "boolean", default: false},
-      recordRawTrace: {type: "boolean", default: false},
+      recordRawTrace: {type: "boolean", default: true},
       authTokenEnv: {type: "string", default: "OPENCLAW_SCHEDULER_TOKEN"},
       logLevel: {enum: ["error", "warn", "info", "debug"], default: "info"},
       executionBackend: {enum: ["hook-only", "marker", "managed-wrapper"], default: "hook-only"},

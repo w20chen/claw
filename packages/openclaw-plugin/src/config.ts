@@ -7,7 +7,7 @@ const defaults: PluginConfig = {
   reportTimeoutMs: 800,
   failOpen: true,
   sendRawParams: false,
-  recordRawTrace: false,
+  recordRawTrace: true,
   authTokenEnv: "OPENCLAW_SCHEDULER_TOKEN",
   logLevel: "info",
   executionBackend: "hook-only",
