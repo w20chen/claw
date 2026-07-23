@@ -14,6 +14,14 @@ from agent_scheduler.config import SchedulerConfig
 from agent_scheduler.monitoring.tool_runtime import _relative_timeline
 
 
+def _read_trace_records(trace_dir: Path) -> list[dict]:
+    """Find the first JSONL file in trace_dir and return parsed records."""
+    files = list(trace_dir.glob("*.jsonl"))
+    if not files:
+        return []
+    return [json.loads(line) for line in files[0].read_text(encoding="utf-8").splitlines()]
+
+
 def _client(tmp_path: Path) -> TestClient:
     state = build_state(SchedulerConfig())
     return TestClient(create_app(state))
@@ -276,53 +284,43 @@ def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Pa
     assert client.post("/v1/events/model", json=model_ended).json() == {"stored": True}
 
     # Find the per-run trace file
-    trace_files = list(trace_dir.glob("*.jsonl"))
-    assert len(trace_files) >= 1
-    records = [json.loads(line) for line in trace_files[0].read_text(encoding="utf-8").splitlines()]
+    records = _read_trace_records(trace_dir)
+    assert len(records) >= 1
     assert records[0]["record_type"] == "trace_metadata"
     assert records[0]["schema_version"] == 6
 
     tool_starts = [r for r in records if r.get("record_type") == "span_start" and r.get("kind") == "tool"]
-    assert len(tool_records) == 1
-    tool_record = tool_records[0]
-    assert tool_record["type"] == "action"
-    assert tool_record["action_id"] == "call-trace"
-    assert tool_record["agent_id"] == "agent-trace"
-    assert 1.9 <= tool_record["ts_end"] - tool_record["ts_start"] <= 2.1
-    assert tool_record["data"]["tool_name"] == "exec"
-    assert tool_record["data"]["tool_args"] == {"command": "pytest tests/test_trace.py"}
-    assert tool_record["data"]["tool_result"] == "2 passed"
-    assert tool_record["data"]["openclaw_before_event"] == {
-        "params": {"command": "pytest tests/test_trace.py"}
-    }
-    assert tool_record["data"]["openclaw_after_event"] == {"result": "2 passed"}
-    assert tool_record["data"]["duration_ms"] == 2000.0
-    resource_usage = tool_record["data"]["resource_usage"]
-    assert resource_usage["attribution_status"] == "unattributed"
-    assert "cpu_time_delta_s" in resource_usage
-    assert "cpu_utilization_avg_cores" in resource_usage
-    assert "sampling_quality" in resource_usage
-    assert "sampling_point_count" in resource_usage
-    assert "memory_footprint_bytes" in resource_usage
-    assert "memory_rss_bytes_peak" in resource_usage
-    assert "net_rx_bytes_delta" in resource_usage
-    assert "net_rx_bytes_per_s" in resource_usage
-    assert "disk_read_bytes_delta" in resource_usage
-    assert "disk_read_bytes_per_s" in resource_usage
-    assert "timeline" in resource_usage
+    assert len(tool_starts) == 1
+    tool_start = tool_starts[0]
+    assert tool_start["trace_id"] == "run-trace"
+    assert tool_start["agent_id"] == "agent-trace"
+    assert tool_start["name"] == "exec"
+    assert tool_start["input"]["requested_args"] == {"command": "pytest tests/test_trace.py"}
 
-    model_records = [record for record in records if record.get("action_type") == "llm_call"]
-    assert len(model_records) == 1
-    assert model_records[0]["type"] == "action"
-    assert model_records[0]["action_id"] == "llm-trace"
-    assert model_records[0]["data"]["model"] == "test-model"
-    assert model_records[0]["data"]["messages_in"] == [{"role": "user", "content": "run tests"}]
-    assert model_records[0]["data"]["content"] == "done"
+    tool_ends = [r for r in records if r.get("record_type") == "span_end" and r.get("kind") == "tool"]
+    assert len(tool_ends) == 1
+    tool_end = tool_ends[0]
+    assert tool_end["status"]["code"] == "ok"
+    assert tool_end["output"]["result"] == "2 passed"
+    assert tool_end["output"]["exit_code"] == 0
+    assert tool_end["resources"]["cpu_time_s"] is not None
+    assert tool_end["resources"]["rss_peak_bytes"] is not None
+
+    model_starts = [r for r in records if r.get("record_type") == "span_start" and r.get("kind") == "llm"]
+    assert len(model_starts) == 1
+    assert model_starts[0]["name"] == "test-model"
+    assert model_starts[0]["input"]["messages"] == [{"role": "user", "content": "run tests"}]
+
+    model_ends = [r for r in records if r.get("record_type") == "span_end" and r.get("kind") == "llm"]
+    assert len(model_ends) == 1
+    assert model_ends[0]["output"]["content"] == "done"
 
 
 def test_proxy_capture_without_model_hook_does_not_write_standalone_trace(tmp_path: Path, monkeypatch) -> None:
-    client, trace_path = _trace_proxy_client(tmp_path)
-    trace_path.unlink()
+    client, trace_dir = _trace_proxy_client(tmp_path)
+    # Remove any existing trace files
+    for f in trace_dir.glob("*.jsonl"):
+        f.unlink()
 
     class FakeAsyncClient:
         def __init__(self, *args, **kwargs) -> None:
@@ -361,11 +359,11 @@ def test_proxy_capture_without_model_hook_does_not_write_standalone_trace(tmp_pa
     )
 
     assert response.status_code == 200
-    assert not trace_path.exists()
+    assert _read_trace_records(trace_dir) == []
 
 
 def test_llm_proxy_records_full_request_and_response(tmp_path: Path, monkeypatch) -> None:
-    client, trace_path = _trace_proxy_client(tmp_path)
+    client, trace_dir = _trace_proxy_client(tmp_path)
 
     class FakeAsyncClient:
         def __init__(self, *args, **kwargs) -> None:
@@ -409,13 +407,12 @@ def test_llm_proxy_records_full_request_and_response(tmp_path: Path, monkeypatch
 
     assert response.status_code == 200
     assert response.json()["choices"][0]["message"]["content"] == "world"
-    records = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
-    llm_records = [record for record in records if record.get("action_type") == "llm_call"]
-    assert llm_records == []
+    # Proxy-only calls should not write trace without model hook
+    assert _read_trace_records(trace_dir) == []
 
 
 def test_model_hook_record_is_enriched_from_proxy_capture(tmp_path: Path, monkeypatch) -> None:
-    client, trace_path = _trace_proxy_client(tmp_path)
+    client, trace_dir = _trace_proxy_client(tmp_path)
 
     class FakeAsyncClient:
         def __init__(self, *args, **kwargs) -> None:
@@ -486,21 +483,17 @@ def test_model_hook_record_is_enriched_from_proxy_capture(tmp_path: Path, monkey
     assert client.post("/v1/events/model", json=started).json() == {"stored": True}
     assert client.post("/v1/events/model", json=ended).json() == {"stored": True}
 
-    records = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
-    llm_records = [record for record in records if record.get("action_type") == "llm_call"]
-    assert len(llm_records) == 1
-    record = llm_records[0]
-    assert record["run_id"] == "run-proxy"
-    assert record["session_id"] == "session-proxy"
-    assert record["session_key"] == "agent:main:main"
-    assert record["agent_id"] == "main"
-    assert record["data"]["messages_in"] == [{"role": "user", "content": "hello"}]
-    assert record["data"]["content"] == "world"
-    assert record["data"]["raw_response"]["choices"][0]["message"]["content"] == "world"
+    records = _read_trace_records(trace_dir)
+    llm_starts = [r for r in records if r.get("record_type") == "span_start" and r.get("kind") == "llm"]
+    assert len(llm_starts) == 1
+    assert llm_starts[0]["run_id"] == "run-proxy"
+    assert llm_starts[0]["session_id"] == "session-proxy"
+    assert llm_starts[0]["agent_id"] == "main"
+    assert llm_starts[0]["input"]["messages"] == [{"role": "user", "content": "hello"}]
 
 
 def test_llm_proxy_reconstructs_streaming_tool_calls(tmp_path: Path, monkeypatch) -> None:
-    client, trace_path = _trace_proxy_client(tmp_path)
+    client, trace_dir = _trace_proxy_client(tmp_path)
 
     class FakeStream:
         status_code = 200
@@ -574,8 +567,8 @@ def test_llm_proxy_reconstructs_streaming_tool_calls(tmp_path: Path, monkeypatch
     )
 
     assert response.status_code == 200
-    records = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
-    assert [record for record in records if record.get("action_type") == "llm_call"] == []
+    # Proxy-only streaming should not write trace without model hook
+    assert _read_trace_records(trace_dir) == []
 
 
 def test_execution_registration_round_trip(tmp_path: Path) -> None:

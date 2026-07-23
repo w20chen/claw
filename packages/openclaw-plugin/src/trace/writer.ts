@@ -31,7 +31,7 @@ export class TraceWriter {
       mkdirSync(dir, { recursive: true });
     }
     try {
-      this.fileHandle = await open(this.filePath, "a");
+      this.fileHandle = await open(this.filePath, "w");
     } catch (err) {
       this.logger.warn("trace writer failed to open file", safeError(err));
     }

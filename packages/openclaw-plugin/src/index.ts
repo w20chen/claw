@@ -44,6 +44,9 @@ const pluginVersion = "0.1.0";
 // ── Plugin-wide state ──────────────────────────────────────────────────
 let registry: SpanRegistry | null = null;
 
+/** Unique instance ID generated once per plugin load (≈ per CLI launch). */
+const instanceId = randomUUID();
+
 /** Per-run trace writers, keyed by normalized run identity. */
 const runWriters = new Map<string, TraceWriter>();
 
@@ -60,7 +63,7 @@ async function getRunWriter(
   logger: { warn(message: string, data?: unknown): void },
   flushSpanStart: boolean,
 ): Promise<TraceWriter> {
-  const key = runId ?? "unknown-run";
+  const key = runId ?? instanceId;
   const existing = runWriters.get(key);
   if (existing) return existing;
 
@@ -141,15 +144,39 @@ export default definePluginEntry({
   registry = new SpanRegistry();
   const traceCfg = config.trace;
 
+  // ── Debug: dump OpenClaw hook payload keys (once per plugin load) ──
+  let debugDumped = false;
+  function dumpHookShape(event: unknown, context: unknown, hookName: string): void {
+    if (debugDumped) return;
+    debugDumped = true;
+    const evtKeys = isRecord(event) ? Object.keys(event as Record<string, unknown>) : [];
+    const ctxKeys = isRecord(context) ? Object.keys(context as Record<string, unknown>) : [];
+    logger.warn(`[trace debug] ${hookName} hook shape`, {
+      hook: hookName,
+      event_keys: evtKeys,
+      event_run_id: extractString(event, ["run_id", "runId"]),
+      event_session_id: extractString(event, ["session_id", "sessionId"]),
+      event_agent_id: extractString(event, ["agent_id", "agentId"]),
+      event_tool_call_id: extractString(event, ["tool_call_id", "toolCallId", "id"]),
+      event_tool_name: extractString(event, ["tool_name", "toolName", "name"]),
+      context_keys: ctxKeys,
+      context_runId: extractString(context, ["runId", "run_id"]),
+      context_sessionId: extractString(context, ["sessionId", "session_id"]),
+      context_agentId: extractString(context, ["agentId", "agent_id"]),
+      instanceId_fallback: instanceId,
+    });
+  }
+
   // ── before_tool_call ──────────────────────────────────────────────
 
   api.on("before_tool_call", async (event: unknown, context: unknown) => {
+    dumpHookShape(event, context, "before_tool_call");
     const toolName = extractString(event, ["tool_name", "toolName", "name"]) ?? "unknown";
     const toolCallId = extractString(event, ["tool_call_id", "toolCallId", "id"]);
-    const runId = extractString(event, ["run_id", "runId"]) ?? extractString(context, ["runId", "run_id"]);
+    const runId = extractString(event, ["run_id", "runId"]) ?? extractString(context, ["runId", "run_id"]) ?? instanceId;
     const sessionId = extractString(event, ["session_id", "sessionId"]) ?? extractString(context, ["sessionId", "session_id"]);
     const agentId = extractString(event, ["agent_id", "agentId"]) ?? extractString(context, ["agentId", "agent_id"]);
-    const traceId = runId ?? "unknown-run";
+    const traceId = runId;
 
     // Resolve parent span
     let parentSpanId: string | null = null;
@@ -269,8 +296,8 @@ export default definePluginEntry({
   api.on("after_tool_call", async (event: unknown, context: unknown) => {
     const toolName = extractString(event, ["tool_name", "toolName", "name"]) ?? "unknown";
     const toolCallId = extractString(event, ["tool_call_id", "toolCallId", "id"]);
-    const runId = extractString(event, ["run_id", "runId"]) ?? extractString(context, ["runId", "run_id"]);
-    const traceId = runId ?? "unknown-run";
+    const runId = extractString(event, ["run_id", "runId"]) ?? extractString(context, ["runId", "run_id"]) ?? instanceId;
+    const traceId = runId;
     const spanId = toolCallId ?? traceId;
 
     const endWall = wallClockNowNs();
@@ -440,13 +467,14 @@ export default definePluginEntry({
   let llmSeqCounter = 0;
 
   api.on("model_call_started", async (event: unknown, context: unknown) => {
+    dumpHookShape(event, context, "model_call_started");
     const callId = extractString(event, ["call_id", "callId", "id"]);
     const runId = extractString(event, ["run_id", "runId"]) ?? extractString(context, ["runId", "run_id"]);
     const sessionId = extractString(event, ["session_id", "sessionId"]) ?? extractString(context, ["sessionId", "session_id"]);
     const agentId = extractString(event, ["agent_id", "agentId"]) ?? extractString(context, ["agentId", "agent_id"]);
     const model = extractString(event, ["model"]) ?? "unknown-model";
     const provider = extractString(event, ["provider"]);
-    const traceId = runId ?? "unknown-run";
+    const traceId = runId ?? instanceId;
 
     llmSeqCounter++;
     const spanId = callId ?? `${traceId}:model:${llmSeqCounter}`;
@@ -519,8 +547,8 @@ export default definePluginEntry({
 
   api.on("model_call_ended", async (event: unknown, context: unknown) => {
     const callId = extractString(event, ["call_id", "callId", "id"]);
-    const runId = extractString(event, ["run_id", "runId"]) ?? extractString(context, ["runId", "run_id"]);
-    const traceId = runId ?? "unknown-run";
+    const runId = extractString(event, ["run_id", "runId"]) ?? extractString(context, ["runId", "run_id"]) ?? instanceId;
+    const traceId = runId;
 
     // Look up the span_id from the started event
     let spanId = callId ?? "";

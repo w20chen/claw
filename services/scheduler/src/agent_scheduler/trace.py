@@ -27,6 +27,7 @@ class AgentTestBenchTraceWriter:
     def __init__(self, trace_dir: Path, *, scaffold: str = "openclaw") -> None:
         self.trace_dir = trace_dir
         self.scaffold = scaffold
+        self._instance_id = str(uuid4())
         self._lock = threading.Lock()
         self._model_starts: dict[str, ModelEvent] = {}
         self._tool_starts: dict[str, ToolBeforeRequest] = {}
@@ -36,7 +37,7 @@ class AgentTestBenchTraceWriter:
         self.trace_dir.mkdir(parents=True, exist_ok=True)
 
     def _file_for_run(self, run_id: str | None, session_id: str | None, agent_id: str | None) -> Path:
-        key = run_id or "unknown-run"
+        key = run_id or self._instance_id
         if key in self._files:
             return self._files[key]
         agent = _safe_filename(agent_id)
@@ -48,7 +49,7 @@ class AgentTestBenchTraceWriter:
         return filepath
 
     def _next_seq(self, run_id: str | None) -> int:
-        key = run_id or "unknown-run"
+        key = run_id or self._instance_id
         current = self._seq_counters.get(key, 0)
         current += 1
         self._seq_counters[key] = current
@@ -72,7 +73,7 @@ class AgentTestBenchTraceWriter:
         ts_start: float,
         ts_end: float,
     ) -> None:
-        trace_id = event.run_id or "unknown-run"
+        trace_id = event.run_id or self._instance_id
         span_id = event.tool_call_id or event.event_id
         parent_span_id = None
         run_id = event.run_id
@@ -181,7 +182,7 @@ class AgentTestBenchTraceWriter:
         ts_end: float,
         proxy_data: dict[str, Any],
     ) -> None:
-        trace_id = event.run_id or "unknown-run"
+        trace_id = event.run_id or self._instance_id
         span_id = event.call_id or event.event_id
         run_id = event.run_id
         session_id = event.session_id
@@ -300,8 +301,9 @@ class AgentTestBenchTraceWriter:
         self._remember_proxy_call(record)
 
     def _ensure_metadata(self, filepath: Path) -> None:
+        # Truncate if file already exists from a previous run
         if filepath.exists() and filepath.stat().st_size > 0:
-            return
+            filepath.unlink()
         self._append(filepath, self._metadata_record())
 
     def _append(self, filepath: Path, record: dict[str, Any]) -> None:
