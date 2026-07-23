@@ -222,7 +222,10 @@ def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Pa
         },
         "raw_params": {"command": "pytest tests/test_trace.py"},
         "raw_event": {"params": {"command": "pytest tests/test_trace.py"}},
-        "resource_scope": None,
+        # Provide the current process PID so the resource sampler can capture
+        # real cpu_time / rss data (needed by assertions below).  Without a
+        # PID the sampler returns an empty snapshot and cpu_time_s stays None.
+        "resource_scope": {"pid": os.getpid()},
     }
     decision = client.post("/v1/decisions/tool", json=request).json()
 
