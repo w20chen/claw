@@ -85,7 +85,7 @@ def build_bundle(config: RunnerConfig) -> Path:
 def _copy_plugin(repo: Path, bundle_dir: Path, config: RunnerConfig) -> None:
     src = repo / config.bundle.plugin_source
     dst = bundle_dir / "plugin"
-    _copytree_selective(src, dst, skip={"node_modules", ".git", "__pycache__", "dist"})
+    _copytree_selective(src, dst, skip={"node_modules", ".git", "__pycache__"})
     _log(f"  Copied plugin source ({_count_files(dst)} files)")
 
 
@@ -168,17 +168,48 @@ echo "[claw] === Phase 3: configure OpenClaw ==="
 # vLLM provider requires VLLM_API_KEY (any value works).
 export VLLM_API_KEY="${LLM_API_KEY:-sk-test}"
 
-openclaw onboard --non-interactive \
+# Save ALL Phase 3 diagnostics to a log file for debugging.
+# Each command handles its own errors so 'set -e' does not abort.
+{
+echo "=== openclaw onboard ==="
+# --skip-health: we use openclaw agent --local, no gateway needed.
+# --accept-risk: required for non-interactive mode.
+openclaw onboard --non-interactive --accept-risk --skip-health \
     --mode local --auth-choice vllm \
     --custom-base-url "http://127.0.0.1:$SIDECAR_PORT/v1" \
     --custom-api-key "__LLM_KEY__" \
-    --custom-model-id "__MODEL_SHORT__" 2>/dev/null || true
+    --custom-model-id "__MODEL_SHORT__" || echo "onboard FAILED (exit=$?)"
+echo ""
 
-openclaw plugins install --link "$CLAW_ROOT/plugin" 2>/dev/null || true
-openclaw plugins enable hardware-scheduler 2>/dev/null || true
+echo "=== openclaw plugins install ==="
+# Copy plugin to writable location to avoid "suspicious ownership" error
+# from the read-only /claw bind mount (host uid ≠ container root uid).
+cp -r "$CLAW_ROOT/plugin" /tmp/plugin
+openclaw plugins install --link /tmp/plugin || echo "plugin install FAILED (exit=$?)"
+echo "=== openclaw plugins enable ==="
+openclaw plugins enable hardware-scheduler || echo "plugin enable FAILED (exit=$?)"
+echo ""
+
 if [ -f "$CLAW_ROOT/openclaw-config.json5" ]; then
-    openclaw config patch --stdin < "$CLAW_ROOT/openclaw-config.json5" 2>/dev/null || true
+    echo "=== openclaw config patch ==="
+    openclaw config patch --stdin < "$CLAW_ROOT/openclaw-config.json5" || echo "config patch FAILED (exit=$?)"
+    echo ""
 fi
+
+echo "=== openclaw models list ==="
+openclaw models list || echo "models list FAILED (exit=$?)"
+echo ""
+
+echo "=== sidecar /v1/models ==="
+curl -sS "http://127.0.0.1:$SIDECAR_PORT/v1/models" || echo "/v1/models FAILED (exit=$?)"
+echo ""
+
+echo "=== sidecar /health/ready ==="
+curl -sS "http://127.0.0.1:$SIDECAR_PORT/health/ready" || echo "/health/ready FAILED (exit=$?)"
+echo ""
+
+echo "=== Phase 3 done ==="
+} > "$TRACE_DIR/phase3.log" 2>&1 || true
 
 echo "[claw] === Phase 4: run agent ==="
 AGENT_EXIT=0
