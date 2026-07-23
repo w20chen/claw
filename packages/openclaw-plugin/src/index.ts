@@ -50,6 +50,9 @@ const instanceId = randomUUID();
 /** Per-run trace writers, keyed by normalized run identity. */
 const runWriters = new Map<string, TraceWriter>();
 
+/** Pending writer creation promises to prevent concurrent creation races. */
+const pendingWriters = new Map<string, Promise<TraceWriter | null>>();
+
 function safeFilename(segment: string | null): string {
   if (!segment) return "unknown";
   return segment.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").slice(0, 64);
@@ -87,31 +90,51 @@ async function getRunWriter(
   const existing = runWriters.get(key);
   if (existing) return existing;
 
-  const agent = safeFilename(agentId);
-  const session = safeFilename(sessionId);
-  const run = safeFilename(runId);
-  const filename = `${agent}_${session}_${run}.jsonl`;
-  const { join } = await import("node:path");
-  const filePath = join(traceDir, filename);
+  // Prevent concurrent creation: if another caller is already creating
+  // a writer for this key, wait for it and return the same writer.
+  const pending = pendingWriters.get(key);
+  if (pending) return pending;
 
-  const traceLogger = { warn: (msg: string, d?: unknown) => logger.warn(msg, d), info: (_msg: string, _d?: unknown) => {}, error: (_msg: string, _d?: unknown) => {} };
-  const w = new TraceWriter(filePath, flushSpanStart, traceLogger);
-  await w.open();
+  const promise = (async (): Promise<TraceWriter | null> => {
+    // Double-check after acquiring the creation slot
+    const recheck = runWriters.get(key);
+    if (recheck) return recheck;
 
-  const metadata: TraceMetadataRecord = {
-    schema_version: TRACE_SCHEMA_VERSION,
-    record_type: "trace_metadata",
-    trace_format_version: TRACE_SCHEMA_VERSION,
-    scaffold: "openclaw",
-    mode: "collect",
-    created_at: new Date().toISOString().replace("+00:00", "Z"),
-    clock_source: CLOCK_SOURCE_DESCRIPTION,
-    clock_precision: CLOCK_PRECISION,
-  };
-  w.writeRecord(metadata);
+    const session = safeFilename(sessionId);
+    const run = safeFilename(runId);
+    // Note: agent_id is included per-record in the JSONL content.
+    // It is omitted from the filename because model hooks (model_call_started,
+    // model_call_ended) do not expose agent_id — an OpenClaw limitation.
+    const filename = `${session}_${run}.jsonl`;
+    const { join } = await import("node:path");
+    const filePath = join(traceDir, filename);
 
-  runWriters.set(key, w);
-  return w;
+    const traceLogger = { warn: (msg: string, d?: unknown) => logger.warn(msg, d), info: (_msg: string, _d?: unknown) => {}, error: (_msg: string, _d?: unknown) => {} };
+    const w = new TraceWriter(filePath, flushSpanStart, traceLogger);
+    await w.open();
+
+    const metadata: TraceMetadataRecord = {
+      schema_version: TRACE_SCHEMA_VERSION,
+      record_type: "trace_metadata",
+      trace_format_version: TRACE_SCHEMA_VERSION,
+      scaffold: "openclaw",
+      mode: "collect",
+      created_at: new Date().toISOString().replace("+00:00", "Z"),
+      clock_source: CLOCK_SOURCE_DESCRIPTION,
+      clock_precision: CLOCK_PRECISION,
+    };
+    w.writeRecord(metadata);
+
+    runWriters.set(key, w);
+    return w;
+  })();
+
+  pendingWriters.set(key, promise);
+  try {
+    return await promise;
+  } finally {
+    pendingWriters.delete(key);
+  }
 }
 
 export default definePluginEntry({

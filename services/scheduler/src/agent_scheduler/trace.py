@@ -60,10 +60,12 @@ class AgentTestBenchTraceWriter:
             key = self._instance_id
         if key in self._files:
             return self._files[key]
-        agent = _safe_filename(agent_id)
         session = _safe_filename(session_id)
         run = _safe_filename(run_id)
-        filename = f"{agent}_{session}_{run}.jsonl"
+        # Note: agent_id is included per-record in the JSONL content.
+        # It is omitted from the filename because model hooks do not
+        # expose agent_id — an OpenClaw limitation.
+        filename = f"{session}_{run}.jsonl"
         filepath = self.trace_dir / filename
         self._files[key] = filepath
         return filepath

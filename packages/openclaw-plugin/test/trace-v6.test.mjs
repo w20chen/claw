@@ -271,6 +271,50 @@ test("writer does not interleave concurrent writes", async () => {
   await unlink(path);
 });
 
+test("concurrent getRunWriter creates only one writer per key", async () => {
+  // Verify the promise-lock pattern used in index.ts prevents
+  // concurrent creation of duplicate writers for the same key.
+  const writers = new Map();
+  const pending = new Map();
+
+  async function getWriter(key, label) {
+    const existing = writers.get(key);
+    if (existing) return { key, label: existing.label };
+
+    const inflight = pending.get(key);
+    if (inflight) return inflight;
+
+    const promise = (async () => {
+      const recheck = writers.get(key);
+      if (recheck) return { key, label: recheck.label };
+      // Simulate async I/O (file open)
+      await new Promise(r => setTimeout(r, 5));
+      const w = { key, label };
+      writers.set(key, w);
+      return w;
+    })();
+
+    pending.set(key, promise);
+    try {
+      return await promise;
+    } finally {
+      pending.delete(key);
+    }
+  }
+
+  // Fire 20 concurrent creations with the SAME key, different labels
+  const results = await Promise.all(
+    Array.from({ length: 20 }, (_, i) => getWriter("run-abc", `caller-${i}`))
+  );
+
+  // All 20 callers must receive the SAME writer object
+  const labels = results.map(r => r.label);
+  const uniqueLabels = [...new Set(labels)];
+  assert.equal(uniqueLabels.length, 1, 
+    `race: expected 1 writer (got ${uniqueLabels.length}). Labels: ${labels.join(",")}`);
+  assert.equal(writers.size, 1, `race: expected 1 writer in map, got ${writers.size}`);
+});
+
 // ── Sanitizer Tests ───────────────────────────────────────────────────
 
 test("sanitizer redacts sensitive keys", () => {
