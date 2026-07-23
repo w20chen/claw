@@ -56,14 +56,21 @@ def run_execution(endpoint: str, execution_id: str, token: str) -> int:
     affinity_cpus = parsed_affinity or None
 
     child = _spawn_shell(command, cwd, cgroup_path=cgroup_path, affinity_cpus=affinity_cpus)
+    # Track whether we own this cgroup (created by us) or are borrowing
+    # a pre-existing one (e.g. Docker container's read-only cgroup).
+    cgroup_owned = cgroup_path is not None
     try:
-        if not _join_child_cgroup(child.pid, cgroup_path):
-            _cleanup_cgroup(cgroup_path)
-            cgroup_path = None
-        _verify_child_cgroup(child.pid, cgroup_path)
+        if cgroup_owned:
+            if not _join_child_cgroup(child.pid, cgroup_path):
+                # Join failed — cgroup is likely read-only (Docker container).
+                # Keep cgroup_path: the sidecar only *reads* stats and does
+                # not need the child process to be a member of that cgroup.
+                cgroup_owned = False
+            _verify_child_cgroup(child.pid, cgroup_path)
     except Exception:
         _terminate_child_best_effort(child)
-        _cleanup_cgroup(cgroup_path)
+        if cgroup_owned:
+            _cleanup_cgroup(cgroup_path)
         raise
     _install_signal_forwarders(child)
     _post_json_best_effort(
@@ -87,7 +94,7 @@ def run_execution(endpoint: str, execution_id: str, token: str) -> int:
         f"/v2/executions/{execution_id}/exited",
         {"update_token": update_token, "exit_code": exit_code, "signal": term_signal},
     )
-    _cleanup_cgroup(cgroup_path)
+    _cleanup_cgroup(cgroup_path) if cgroup_owned else None
     return _shell_exit_code(returncode)
 
 
@@ -199,6 +206,31 @@ def _pid_namespace_inode(pid: int) -> int | None:
     return None
 
 
+def _read_self_cgroup_path() -> str | None:
+    """Return the current process's cgroup v2 path, or None.
+
+    Reads /proc/self/cgroup to find the cgroup this process belongs to.
+    Returns a full filesystem path (e.g. /sys/fs/cgroup/user.slice/...)
+    suitable for reading cgroup stat files.
+
+    This is used as a last-resort fallback in containers where cgroupfs
+    is mounted read-only: we cannot create sub-cgroups, but we CAN read
+    stats from the container's own cgroup.
+    """
+    try:
+        with open("/proc/self/cgroup", "r") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line.startswith("0::"):
+                    continue
+                path = line[3:]  # strip "0::" prefix
+                if not path or path == "/":
+                    return "/sys/fs/cgroup"
+                return f"/sys/fs/cgroup{path}"
+    except OSError:
+        return None
+
+
 def _explicit_cgroup_path() -> str | None:
     raw = os.environ.get("CLAW_CGROUP_PATH")
     return raw if raw else None
@@ -248,6 +280,16 @@ def _prepare_cgroup(
             last_error = str(exc)
             if _env_enabled("CLAW_CGROUP_DEBUG"):
                 print(f"execution environment: cgroup unavailable at {root}: {exc}", file=sys.stderr)
+
+    # Last resort: borrow the container's own cgroup for read-only monitoring.
+    # In Docker containers cgroupfs is mounted read-only so we cannot create
+    # sub-cgroups, but we CAN read cpu.stat / memory.current / io.stat from
+    # the container's existing cgroup.  The sidecar sampler only reads; it
+    # never writes.
+    if not required:
+        borrowed = _read_self_cgroup_path()
+        if borrowed is not None:
+            return borrowed
 
     if required:
         raise RuntimeError(
@@ -346,7 +388,8 @@ def _create_cgroup_at(
     root_path = Path(root)
     cgroup_path = root_path / _safe_execution_id(execution_id)
     root_path.mkdir(parents=True, exist_ok=True)
-    _enable_cgroup_controller(root_path, "cpuset")
+    if cpu_set or mems:
+        _enable_cgroup_controller(root_path, "cpuset")
     cgroup_path.mkdir(mode=0o700, exist_ok=True)
     if mems:
         _write_file(cgroup_path / "cpuset.mems", mems)
