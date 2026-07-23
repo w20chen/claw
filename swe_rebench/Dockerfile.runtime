@@ -1,0 +1,30 @@
+# ────────────────────────────────────────────────────────────────
+# claw-runtime: pre-built Node.js + OpenClaw + sidecar deps.
+#
+# Built ONCE, mounted into swe-rebench containers at /claw/runtime.
+# This avoids per-container apt-get/npm/pip install (saves ~3 min/task).
+# ────────────────────────────────────────────────────────────────
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ── Node.js 22 (nodesource) ─────────────────────────────────────
+RUN apt-get update -qq \
+    && apt-get install -y -qq --no-install-recommends \
+        ca-certificates curl gnupg python3 python3-pip python3-venv \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y -qq --no-install-recommends nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── OpenClaw CLI ─────────────────────────────────────────────────
+RUN npm install -g openclaw@2026.7.1 \
+    && openclaw --version
+
+# ── Python deps for sidecar ──────────────────────────────────────
+RUN pip3 install --break-system-packages --no-cache-dir \
+        fastapi uvicorn pydantic psutil httpx prometheus-client \
+    && python3 -c "import fastapi, uvicorn, pydantic, psutil; print('deps OK')"
+
+# Verify
+RUN node --version && openclaw --version && python3 --version

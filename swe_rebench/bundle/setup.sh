@@ -1,8 +1,8 @@
 #!/bin/bash
 # ────────────────────────────────────────────────────────────────
 # Environment setup inside swe-rebench containers.
-# Installs Node.js, npm, OpenClaw CLI, and Python deps if missing.
-# Idempotent ── safe to run multiple times.
+# Installs Node.js, npm, OpenClaw CLI, and Python deps.
+# Idempotent -- safe to run multiple times.
 # ────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -12,34 +12,35 @@ if [ -f "$SETUP_DONE" ]; then
     return 0 2>/dev/null || exit 0
 fi
 
+# Detect python: prefer conda python shipped by swe-rebench images.
+if [ -x /opt/conda/bin/python3 ]; then
+    _CLW_PYTHON="/opt/conda/bin/python3"
+    _CLW_PIP="/opt/conda/bin/pip"
+elif command -v python3 &>/dev/null; then
+    _CLW_PYTHON="$(command -v python3)"
+    _CLW_PIP="$(command -v pip3 2>/dev/null || command -v pip 2>/dev/null)"
+else
+    _CLW_PYTHON="python3"
+    _CLW_PIP="pip3"
+fi
+
+
 echo "[claw] installing system dependencies..."
 
-# Detect OS / package manager
-if command -v apt-get &>/dev/null; then
-    PKG_MGR="apt"
-elif command -v yum &>/dev/null; then
-    PKG_MGR="yum"
-elif command -v dnf &>/dev/null; then
-    PKG_MGR="dnf"
-elif command -v apk &>/dev/null; then
-    PKG_MGR="apk"
-else
-    PKG_MGR="none"
+# ── Detect package manager ──────────────────────────────────────
+if command -v apt-get &>/dev/null; then PKG_MGR="apt"
+elif command -v yum &>/dev/null; then PKG_MGR="yum"
+elif command -v dnf &>/dev/null; then PKG_MGR="dnf"
+elif command -v apk &>/dev/null; then PKG_MGR="apk"
+else PKG_MGR="none"
 fi
 
-# ── Python 3 ──
-if ! command -v python3 &>/dev/null; then
-    echo "[claw] installing python3..."
-    case "$PKG_MGR" in
-        apt) apt-get update -qq && apt-get install -y -qq python3 python3-pip ;;
-        yum) yum install -y -q python3 python3-pip ;;
-        dnf) dnf install -y -q python3 python3-pip ;;
-        apk) apk add --no-cache python3 py3-pip ;;
-        *)  echo "[claw] FATAL: cannot install python3 (no known package manager)" ; exit 1 ;;
-    esac
-fi
+case "$PKG_MGR" in
+    apt) apt-get update -qq ;;
+    apk) apk update ;;
+esac
 
-# ── curl (needed for health checks) ──
+# ── curl (needed for health checks + nodesource) ────────────────
 if ! command -v curl &>/dev/null; then
     echo "[claw] installing curl..."
     case "$PKG_MGR" in
@@ -50,43 +51,73 @@ if ! command -v curl &>/dev/null; then
     esac
 fi
 
-# ── Node.js + npm ──
-if ! command -v node &>/dev/null; then
-    echo "[claw] installing Node.js..."
+# ── Python 3 (system fallback -- usually conda is already present) ──
+if ! $_CLW_PYTHON --version &>/dev/null 2>&1; then
+    echo "[claw] installing python3..."
+    case "$PKG_MGR" in
+        apt) apt-get install -y -qq python3 python3-pip ;;
+        yum) yum install -y -q python3 python3-pip ;;
+        dnf) dnf install -y -q python3 python3-pip ;;
+        apk) apk add --no-cache python3 py3-pip ;;
+        *)  echo "[claw] FATAL: cannot install python3" ; exit 1 ;;
+    esac
+    _CLW_PYTHON="$(command -v python3)"
+    _CLW_PIP="$(command -v pip3 2>/dev/null || command -v pip 2>/dev/null)"
+fi
+echo "[claw] python=$_CLW_PYTHON"
+
+# ── Node.js 22 (nodesource) ─────────────────────────────────────
+NODE_OK=0
+if command -v node &>/dev/null && node --version &>/dev/null 2>&1; then
+    NODE_OK=1
+fi
+if [ "$NODE_OK" -eq 0 ]; then
+    echo "[claw] installing Node.js 22.x..."
     case "$PKG_MGR" in
         apt)
-            apt-get update -qq
-            apt-get install -y -qq ca-certificates curl gnupg
+            apt-get install -y -qq ca-certificates gnupg
             curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
             apt-get install -y -qq nodejs
+            # Node 22 on Debian 12 may need libicu72 (not always auto-installed)
+            apt-get install -y -qq libicu72 2>/dev/null || true
             ;;
         yum|dnf)
             curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
             $PKG_MGR install -y -q nodejs
             ;;
         apk)
-            apk add --no-cache nodejs npm
+            apk add --no-cache nodejs npm icu
             ;;
-        *)
-            echo "[claw] FATAL: cannot install Node.js (no known package manager)"
-            exit 1
-            ;;
+        *)  echo "[claw] FATAL: cannot install Node.js" ; exit 1 ;;
     esac
 fi
 
-# ── OpenClaw CLI ──
-if ! command -v openclaw &>/dev/null; then
-    echo "[claw] installing OpenClaw CLI..."
-    npm install -g openclaw@2026.7.1 2>/dev/null ||       npm install -g openclaw 2>/dev/null || {
-        echo "[claw] WARNING: openclaw install failed, continuing anyway"
-    }
+# Verify node actually works (not just installed with broken libs)
+if node --version &>/dev/null 2>&1; then
+    echo "[claw] node $(node --version) OK"
+else
+    echo "[claw] FATAL: node installed but does not run (missing libicu?)"
+    ldd "$(command -v node)" 2>&1 | grep "not found" || true
+    exit 1
 fi
 
-# ── Python dependencies for sidecar ──
-echo "[claw] installing Python deps for sidecar..."
-cd /claw/scheduler
-python3 -m pip install --quiet fastapi uvicorn pydantic psutil httpx prometheus-client 2>/dev/null || true
+# ── OpenClaw CLI ─────────────────────────────────────────────────
+if ! command -v openclaw &>/dev/null; then
+    echo "[claw] installing openclaw CLI..."
+    npm install -g openclaw@2026.7.1 2>/dev/null || npm install -g openclaw 2>/dev/null || {
+        echo "[claw] FATAL: openclaw install failed"
+        exit 1
+    }
+fi
+echo "[claw] openclaw $(openclaw --version 2>&1 | head -1)"
 
-# ── Mark done ──
+# ── Sidecar Python deps ─────────────────────────────────────────
+echo "[claw] installing sidecar Python deps..."
+$_CLW_PIP install --quiet \
+    fastapi uvicorn pydantic psutil httpx prometheus-client \
+    2>&1 | tail -1
+$_CLW_PYTHON -c "import fastapi, uvicorn, pydantic, psutil; print('[claw] sidecar deps OK')"
+
+# ── Done ────────────────────────────────────────────────────────
 touch "$SETUP_DONE"
-echo "[claw] environment setup complete."
+echo "[claw] setup complete."

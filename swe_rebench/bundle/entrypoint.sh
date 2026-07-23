@@ -1,21 +1,26 @@
 #!/bin/bash
-# ────────────────────────────────────────────────────────────────
-# OpenClaw + Sidecar entrypoint for swe-rebench containers.
-# Mounted at /claw/entrypoint.sh, invoked as the container ENTRYPOINT.
-# ────────────────────────────────────────────────────────────────
 set -euo pipefail
-
 CLAW_ROOT="/claw"
 TRACE_DIR="/traces"
 SIDECAR_PORT=8765
 
-# ── Phase 1: Environment setup ─────────────────────────────────
-echo "[claw] setting up environment..."
+# Detect python: prefer conda python shipped by swe-rebench images.
+if [ -x /opt/conda/bin/python3 ]; then
+    _CLW_PYTHON="/opt/conda/bin/python3"
+    _CLW_PIP="/opt/conda/bin/pip"
+elif command -v python3 &>/dev/null; then
+    _CLW_PYTHON="$(command -v python3)"
+    _CLW_PIP="$(command -v pip3 2>/dev/null || command -v pip 2>/dev/null)"
+else
+    _CLW_PYTHON="python3"
+    _CLW_PIP="pip3"
+fi
+
+
+echo "[claw] === Phase 1: environment setup ==="
 bash "$CLAW_ROOT/setup.sh"
 
-# ── Phase 2: Start sidecar ─────────────────────────────────────
-echo "[claw] starting scheduler sidecar on :$SIDECAR_PORT ..."
-
+echo "[claw] === Phase 2: start sidecar ==="
 export AGENT_SCHEDULER_DB_PATH="/tmp/scheduler.sqlite3"
 export AGENT_SCHEDULER_TRACE_DIR="$TRACE_DIR"
 export AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL="https://api.deepseek.com"
@@ -26,17 +31,16 @@ export AGENT_SCHEDULER_TOOL_PROFILES="$CLAW_ROOT/tool_profiles.json"
 
 cd "$CLAW_ROOT/scheduler"
 
-# Install scheduler deps (quiet, fail gracefully if already installed)
-python3 -m pip install -e . --quiet 2>/dev/null || \
-  python3 -m pip install . --quiet 2>/dev/null || true
+# Install scheduler package (editable, best-effort)
+$_CLW_PIP install -e . --quiet 2>/dev/null || $_CLW_PIP install . --quiet 2>/dev/null || true
 
-# Start sidecar in background
-PYTHONPATH=src python3 -m agent_scheduler.main \
+# Start sidecar
+PYTHONPATH=src $_CLW_PYTHON -m agent_scheduler.main \
     --host 127.0.0.1 --port "$SIDECAR_PORT" &
 SIDECAR_PID=$!
 echo "[claw] sidecar PID=$SIDECAR_PID"
 
-# Wait for sidecar to be ready
+# Wait for ready
 READY=0
 for i in $(seq 1 60); do
     if curl -sf "http://127.0.0.1:$SIDECAR_PORT/health/ready" >/dev/null 2>&1; then
@@ -46,39 +50,27 @@ for i in $(seq 1 60); do
     fi
     sleep 1
 done
-
 if [ "$READY" -eq 0 ]; then
-    echo "[claw] ERROR: sidecar failed to start within 60s"
+    echo "[claw] FATAL: sidecar not ready after 60s"
     kill "$SIDECAR_PID" 2>/dev/null || true
     exit 1
 fi
 
-# ── Phase 3: Configure OpenClaw ─────────────────────────────────
-echo "[claw] configuring OpenClaw..."
-
-# Onboard via sidecar proxy (captures all LLM traffic)
+echo "[claw] === Phase 3: configure OpenClaw ==="
 openclaw onboard --non-interactive \
-    --mode local \
-    --auth-choice vllm \
+    --mode local --auth-choice vllm \
     --custom-base-url "http://127.0.0.1:$SIDECAR_PORT/v1" \
     --custom-api-key "" \
     --custom-model-id "deepseek-v4-flash" 2>/dev/null || true
 
-# Install and enable the hardware-scheduler plugin
 openclaw plugins install --link "$CLAW_ROOT/plugin" 2>/dev/null || true
 openclaw plugins enable hardware-scheduler 2>/dev/null || true
-
-# Patch plugin config (recordRawTrace=true so tool args/results are captured)
 if [ -f "$CLAW_ROOT/openclaw-config.json5" ]; then
     openclaw config patch --stdin < "$CLAW_ROOT/openclaw-config.json5" 2>/dev/null || true
 fi
 
-# ── Phase 4: Run the agent ──────────────────────────────────────
-echo "[claw] running agent (max_turns=50)..."
-
-# PROBLEM_STATEMENT and TASK_INSTANCE_ID are passed as env vars by the runner.
+echo "[claw] === Phase 4: run agent (max_turns=50) ==="
 AGENT_EXIT=0
-
 if [ -n "${PROBLEM_STATEMENT:-}" ]; then
     echo "$PROBLEM_STATEMENT" > /tmp/problem_statement.txt
     openclaw run \
@@ -88,29 +80,24 @@ if [ -n "${PROBLEM_STATEMENT:-}" ]; then
         --allowed-tools "exec,read,write,edit,grep,glob,bash,ls" \
          || AGENT_EXIT=$?
 else
-    echo "[claw] WARNING: PROBLEM_STATEMENT not set, running default agent entry"
+    echo "[claw] WARNING: PROBLEM_STATEMENT not set"
     bash "$CLAW_ROOT/run_agent.sh" || AGENT_EXIT=$?
 fi
+echo "[claw] agent exited code=$AGENT_EXIT"
 
-echo "[claw] agent exited with code $AGENT_EXIT"
-
-# ── Phase 5: Stop sidecar ───────────────────────────────────────
-echo "[claw] stopping sidecar..."
+echo "[claw] === Phase 5: stop sidecar ==="
 kill "$SIDECAR_PID" 2>/dev/null || true
 wait "$SIDECAR_PID" 2>/dev/null || true
-
-# Flush: small sleep to let any pending writes complete
 sleep 2
 
-# Log trace output
+# Log traces
 if [ -f "$TRACE_DIR/trace.jsonl" ]; then
-    echo "[claw] trace written: $TRACE_DIR/trace.jsonl ($(wc -l < "$TRACE_DIR/trace.jsonl") lines)"
-elif compgen -G "$TRACE_DIR/*.jsonl" > /dev/null 2>&1; then
+    echo "[claw] trace: $TRACE_DIR/trace.jsonl ($(wc -l < "$TRACE_DIR/trace.jsonl") lines)"
+elif compgen -G "$TRACE_DIR/*.jsonl" >/dev/null 2>&1; then
     for f in "$TRACE_DIR"/*.jsonl; do
-        echo "[claw] trace found: $f ($(wc -l < "$f") lines)"
+        echo "[claw] trace: $f ($(wc -l < "$f") lines)"
     done
 else
-    echo "[claw] WARNING: no trace.jsonl found in $TRACE_DIR"
+    echo "[claw] WARNING: no trace.jsonl found"
 fi
-
 exit $AGENT_EXIT
