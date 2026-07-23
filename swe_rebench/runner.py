@@ -377,12 +377,21 @@ def main() -> None:
     )
     sub = parser.add_subparsers(dest="command", help="Sub-command")
 
+    # Share --config across all subcommands so it can be placed before
+    # OR after the subcommand (argparse limitation workaround).
+    config_arg = lambda p: p.add_argument(
+        "--config", default=None,
+        help=f"Path to config YAML (default: {default_config})",
+    )
+
     # ── prepare ──
     prep = sub.add_parser("prepare", help="Build the runtime bundle")
+    config_arg(prep)
     prep.add_argument("--bundle-dir", default=None, help="Override bundle output directory")
 
     # ── run ──
     run_p = sub.add_parser("run", help="Run swe-rebench tasks")
+    config_arg(run_p)
     run_p.add_argument("--prepare", action="store_true", dest="do_prepare",
                        help="Run prepare step before executing tasks")
     run_p.add_argument("--dataset", default=None,
@@ -404,18 +413,22 @@ def main() -> None:
 
     # ── collect ──
     col = sub.add_parser("collect", help="Collect and export traces from previous runs")
+    config_arg(col)
     col.add_argument("--export-dir", default=None, help="Override flat export directory")
 
     # ── cleanup ──
-    sub.add_parser("cleanup", help="(No-op: containers are auto-removed)")
+    cln = sub.add_parser("cleanup", help="(No-op: containers are auto-removed)")
+    config_arg(cln)
 
     args = parser.parse_args()
+    # Resolve --config: subcommand-level arg takes precedence over top-level.
+    config_path = args.config or default_config
 
     if not args.command:
         parser.print_help()
         return
 
-    config = RunnerConfig.from_yaml(args.config, repo_root=repo_root)
+    config = RunnerConfig.from_yaml(config_path, repo_root=repo_root)
 
     if args.command == "prepare":
         bundle_dir = Path(args.bundle_dir) if args.bundle_dir else None
