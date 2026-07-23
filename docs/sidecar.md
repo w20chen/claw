@@ -71,7 +71,9 @@ Restart the sidecar after editing `.env`.
 The proxy forwards `/v1/models` and `/v1/chat/completions` to the upstream
 provider. Non-streaming and streaming chat completions are recorded as
 `llm_call` actions in `trace.jsonl`, including `messages_in`, reconstructed
-`content`, `raw_request`, and `raw_response`.
+`content`, `raw_request`, and `raw_response`. Streaming responses are stored as
+one reconstructed assistant message; individual SSE chunks are not written to
+the trace.
 
 When the proxy is working, OpenClaw logs show:
 

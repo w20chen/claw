@@ -140,19 +140,16 @@ async def _stream_chat(
             "utf-8"
         )
     finally:
-        _record_proxy_trace(
-            trace_writer,
-            action_id=action_id,
-            payload=payload,
-                response_payload={
-                    "stream_chunks": chunks,
-                    "message": _message_from_stream_chunks(chunks),
-                },
-            started_at=started_at,
-            status_code=status_code,
-            stream=True,
-            error=error if error else (None if status_code < 400 else f"upstream_http_{status_code}"),
-        )
+            _record_proxy_trace(
+                trace_writer,
+                action_id=action_id,
+                payload=payload,
+                response_payload={"message": _message_from_stream_chunks(chunks)},
+                started_at=started_at,
+                status_code=status_code,
+                stream=True,
+                error=error if error else (None if status_code < 400 else f"upstream_http_{status_code}"),
+            )
 
 
 def _record_proxy_trace(
@@ -254,11 +251,10 @@ def _parse_sse_chunk(chunk: bytes) -> list[dict[str, Any] | None]:
 def _content_from_response(response_payload: Any | None) -> Any | None:
     if response_payload is None:
         return None
-    if isinstance(response_payload, dict) and "stream_chunks" in response_payload:
+    if isinstance(response_payload, dict) and "message" in response_payload:
         message = response_payload.get("message")
         if isinstance(message, dict):
             return message.get("content")
-        return response_payload.get("content")
     if not isinstance(response_payload, dict):
         return None
     choices = response_payload.get("choices")

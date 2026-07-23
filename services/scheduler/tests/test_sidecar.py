@@ -503,6 +503,7 @@ def test_llm_proxy_reconstructs_streaming_tool_calls(tmp_path: Path, monkeypatch
     assert message["tool_calls"][0]["id"] == "call-1"
     assert message["tool_calls"][0]["function"]["name"] == "exec"
     assert message["tool_calls"][0]["function"]["arguments"] == '{"command":"python --version"}'
+    assert "stream_chunks" not in data["raw_response"]
 
 
 def test_execution_registration_round_trip(tmp_path: Path) -> None:
