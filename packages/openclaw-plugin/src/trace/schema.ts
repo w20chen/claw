@@ -172,7 +172,12 @@ export interface SpanEndResources {
 
 export interface SpanEndRecord extends SpanIdentity {
   record_type: "span_end";
+  /** Duration computed from monotonic clock (hrtime). */
   duration_ns: string;
+  /** OpenClaw-reported duration in milliseconds, for cross-validation.
+   *  Available when the hook provides duration_ms (model_call_ended,
+   *  after_tool_call).  Null when unavailable. */
+  observed_duration_ms?: number | null;
   status: SpanEndStatus;
   output: SpanEndOutput;
   execution: SpanEndExecution;

@@ -32,7 +32,7 @@ class AgentTestBenchTraceWriter:
         scaffold: str = "openclaw",
         max_messages_bytes: int = 131_072,
     ) -> None:
-        self.trace_dir = trace_dir
+        self.trace_dir = trace_dir.resolve()
         self.scaffold = scaffold
         self._max_messages_bytes = max_messages_bytes
         self._instance_id = str(uuid4())
@@ -341,12 +341,14 @@ class AgentTestBenchTraceWriter:
         key = str(filepath)
         if key in self._metadata_written:
             return
-        self._metadata_written.add(key)
+        # Write first, then mark as written — so a failed write can be retried.
         self._append(filepath, self._metadata_record())
+        self._metadata_written.add(key)
 
     def _append(self, filepath: Path, record: dict[str, Any]) -> None:
         line = json.dumps(record, sort_keys=True, separators=(",", ":"))
         with self._lock:
+            filepath.parent.mkdir(parents=True, exist_ok=True)
             with filepath.open("a", encoding="utf-8") as fh:
                 fh.write(line + "\n")
 

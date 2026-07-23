@@ -492,6 +492,7 @@ export default definePluginEntry({
         wall_time_ns: endWall.toString(),
         monotonic_time_ns: endMono.toString(),
         duration_ns: durNs.toString(),
+        observed_duration_ms: completion.duration_ms ?? null,
         status: {
           code: statusCode,
           message: completion.error_type ?? null,
@@ -674,6 +675,7 @@ export default definePluginEntry({
         wall_time_ns: endWall.toString(),
         monotonic_time_ns: endMono.toString(),
         duration_ns: durNs.toString(),
+        observed_duration_ms: durationMs ?? null,
         status: {
           code: statusCode,
           message: null,
