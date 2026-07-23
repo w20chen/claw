@@ -181,8 +181,9 @@ openclaw agent --help 2>&1 > "$TRACE_DIR/agent-help.txt" || true
 
 if [ -n "${PROBLEM_STATEMENT:-}" ]; then
     echo "$PROBLEM_STATEMENT" > /tmp/problem_statement.txt
-    echo "[claw] running: openclaw agent --local --model __MODEL_FULL__ --message-file ..."
+    echo "[claw] running: openclaw agent --local --agent main --model __MODEL_FULL__ ..."
     openclaw agent --local \
+        --agent main \
         --model "__MODEL_FULL__" \
         --message-file /tmp/problem_statement.txt \
         2>"$TRACE_DIR/agent-stderr.txt" || AGENT_EXIT=$?
@@ -363,6 +364,7 @@ set -euo pipefail
 echo "[claw] running agent (fallback)..."
 echo "[claw] TASK_INSTANCE_ID=${TASK_INSTANCE_ID:-unknown}"
 exec openclaw agent --local \
+    --agent main \
     --model "__MODEL_FULL__" \
     --message "${PROBLEM_STATEMENT:-Solve the task.}"
 """
