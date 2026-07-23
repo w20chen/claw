@@ -66,7 +66,8 @@ def run_execution(endpoint: str, execution_id: str, token: str) -> int:
                 # Keep cgroup_path: the sidecar only *reads* stats and does
                 # not need the child process to be a member of that cgroup.
                 cgroup_owned = False
-            _verify_child_cgroup(child.pid, cgroup_path)
+            else:
+                _verify_child_cgroup(child.pid, cgroup_path)
     except Exception:
         _terminate_child_best_effort(child)
         if cgroup_owned:
@@ -355,24 +356,17 @@ def _try_candidate_parent(parent_path: str) -> bool:
 def _start_user_manager() -> None:
     """Attempt to start systemd --user via D-Bus activation.
 
-    Does not raise on failure — if the user manager cannot be started
-    (no systemd, no D-Bus, etc.), cgroup monitoring falls back to PID.
+    `systemctl --user status` triggers D-Bus activation of the user
+    manager if it is not already running.  Idempotent and safe to call
+    when the manager is already active.
+
+    Does not raise on failure.
     """
-    try:
-        subprocess.run(
-            ["systemctl", "--user", "is-active", "--quiet", "user@$(id -u).service"],
-            capture_output=True,
-            timeout=10,
-            shell=False,  # explicit — the $(id -u) is expanded by the next form
-        )
-    except Exception:
-        pass
-    # The command above is safe but the subshell form is more portable:
     try:
         subprocess.run(
             ["systemctl", "--user", "status"],
             capture_output=True,
-            timeout=10,
+            timeout=5,
         )
     except Exception:
         pass
