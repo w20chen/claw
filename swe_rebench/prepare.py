@@ -175,19 +175,16 @@ if [ -f "$CLAW_ROOT/openclaw-config.json5" ]; then
     openclaw config patch --stdin < "$CLAW_ROOT/openclaw-config.json5" 2>/dev/null || true
 fi
 
-echo "[claw] === Phase 4: run agent (max_turns=__MAX_TURNS__) ==="
+echo "[claw] === Phase 4: run agent ==="
 AGENT_EXIT=0
-# Save help for debugging
-openclaw --help 2>&1 | head -60 > "$TRACE_DIR/openclaw-help.txt" || true
 openclaw agent --help 2>&1 > "$TRACE_DIR/agent-help.txt" || true
 
 if [ -n "${PROBLEM_STATEMENT:-}" ]; then
-    echo "[claw] running: openclaw agent --local __MODEL_FULL__ \"<prompt>\""
-    # openclaw agent: model is positional arg, prompt is positional arg.
-    # Options we know work: --local, --allowed-tools
+    echo "$PROBLEM_STATEMENT" > /tmp/problem_statement.txt
+    echo "[claw] running: openclaw agent --local --model __MODEL_FULL__ --message-file ..."
     openclaw agent --local \
-        __MODEL_FULL__ \
-        "$(cat /tmp/problem_statement.txt)" \
+        --model "__MODEL_FULL__" \
+        --message-file /tmp/problem_statement.txt \
         2>"$TRACE_DIR/agent-stderr.txt" || AGENT_EXIT=$?
 else
     echo "[claw] WARNING: PROBLEM_STATEMENT not set"
@@ -366,8 +363,8 @@ set -euo pipefail
 echo "[claw] running agent (fallback)..."
 echo "[claw] TASK_INSTANCE_ID=${TASK_INSTANCE_ID:-unknown}"
 exec openclaw agent --local \
-    __MODEL_FULL__ \
-    "${PROBLEM_STATEMENT:-Solve the task.}"
+    --model "__MODEL_FULL__" \
+    --message "${PROBLEM_STATEMENT:-Solve the task.}"
 """
 
 
