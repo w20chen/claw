@@ -18,6 +18,7 @@ class SchedulerConfig:
     tool_profiles_path: Path | None = None
     auth_token: str | None = None
     trace_dir: Path = Path("traces")
+    trace_max_messages_bytes: int = 131_072  # 128 KiB, matches plugin default
     resource_poll_interval_ms: int = 50
     resource_timeline_max_points: int = 2_000
     llm_proxy_enabled: bool = True
@@ -37,6 +38,7 @@ class SchedulerConfig:
             tool_profiles_path=_resolve_path(profile, env_base) if profile else None,
             auth_token=os.getenv("AGENT_SCHEDULER_TOKEN"),
             trace_dir=_resolve_path(trace, env_base) if trace else Path("traces"),
+            trace_max_messages_bytes=int(os.getenv("AGENT_SCHEDULER_TRACE_MAX_MESSAGES_BYTES", "131072")),
             resource_poll_interval_ms=int(os.getenv("AGENT_SCHEDULER_RESOURCE_POLL_INTERVAL_MS", "50")),
             resource_timeline_max_points=int(os.getenv("AGENT_SCHEDULER_RESOURCE_TIMELINE_MAX_POINTS", "2000")),
             llm_proxy_enabled=os.getenv("AGENT_SCHEDULER_LLM_PROXY_ENABLED", "true").lower()

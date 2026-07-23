@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import threading
 from uuid import uuid4
 from datetime import datetime, timezone
@@ -24,9 +25,16 @@ class AgentTestBenchTraceWriter:
     Files are named: {agent_id}_{session_id}_{run_id}.jsonl
     """
 
-    def __init__(self, trace_dir: Path, *, scaffold: str = "openclaw") -> None:
+    def __init__(
+        self,
+        trace_dir: Path,
+        *,
+        scaffold: str = "openclaw",
+        max_messages_bytes: int = 131_072,
+    ) -> None:
         self.trace_dir = trace_dir
         self.scaffold = scaffold
+        self._max_messages_bytes = max_messages_bytes
         self._instance_id = str(uuid4())
         self._lock = threading.Lock()
         self._model_starts: dict[str, ModelEvent] = {}
@@ -106,8 +114,10 @@ class AgentTestBenchTraceWriter:
 
         wall_start_ns = str(int(ts_start * 1_000_000_000))
         wall_end_ns = str(int(ts_end * 1_000_000_000))
-        mono_start_ns = wall_start_ns
-        mono_end_ns = wall_end_ns
+        # Use monotonic clock for durations so they are immune to wall-clock
+        # adjustments (NTP, leap seconds).  Wall-clock is preserved separately.
+        mono_start_ns = str(time.monotonic_ns())
+        mono_end_ns = str(time.monotonic_ns())
         duration_ns = str(int(max(0, event.duration_ms) * 1_000_000))
 
         status_code = "ok" if event.succeeded else ("error" if event.error_type else "unknown")
@@ -214,14 +224,18 @@ class AgentTestBenchTraceWriter:
 
         wall_start_ns = str(int(ts_start * 1_000_000_000))
         wall_end_ns = str(int(ts_end * 1_000_000_000))
+        # Use monotonic clock for durations — see _record_tool_v6 for rationale.
+        mono_start_ns = str(time.monotonic_ns())
+        mono_end_ns = str(time.monotonic_ns())
         duration_ns = str(int(max(0, event.duration_ms or 0) * 1_000_000))
 
         status_code = "ok" if event.outcome in ("completed", "ok", "success") else ("error" if event.outcome == "error" else "unknown")
 
-        messages = _first_present(
+        raw_messages = _first_present(
             None if start is None else start.raw_input,
             proxy_data.get("messages_in"),
         )
+        messages = _truncate_messages(raw_messages, self._max_messages_bytes)
 
         filepath = self._file_for_run(run_id, session_id, agent_id)
         self._ensure_metadata(filepath)
@@ -239,7 +253,7 @@ class AgentTestBenchTraceWriter:
             "kind": "llm",
             "name": event.model or "unknown-model",
             "wall_time_ns": wall_start_ns,
-            "monotonic_time_ns": wall_start_ns,
+            "monotonic_time_ns": mono_start_ns,
             "input": {"requested_args": None, "messages": messages},
             "execution": {"mode": None, "execution_id": None},
         })
@@ -257,7 +271,7 @@ class AgentTestBenchTraceWriter:
             "kind": "llm",
             "name": event.model or "unknown-model",
             "wall_time_ns": wall_end_ns,
-            "monotonic_time_ns": wall_end_ns,
+            "monotonic_time_ns": mono_end_ns,
             "duration_ns": duration_ns,
             "status": {"code": status_code, "message": None},
             "output": {"content": event.raw_output},
@@ -423,6 +437,75 @@ def _first_present(*values: Any) -> Any | None:
         if value is not None:
             return value
     return None
+
+
+def _truncate_messages(messages: Any, max_bytes: int) -> Any:
+    """Truncate message content so the serialized form stays within max_bytes.
+
+    Operates on a COPY — never mutates the original.  When the limit is
+    exceeded the first message is kept intact and subsequent messages are
+    dropped; if even the first message exceeds the limit its content is
+    truncated with a marker.
+    """
+    if messages is None:
+        return None
+    if max_bytes <= 0:
+        return None
+
+    # Fast path: serialise and check
+    try:
+        line = json.dumps(messages, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return messages  # can't serialise, return as-is
+
+    if len(line.encode("utf-8")) <= max_bytes:
+        return messages
+
+    # Need to truncate.  Work on a copy.
+    if not isinstance(messages, list):
+        return _truncate_single_message(messages, max_bytes)
+
+    kept: list[Any] = []
+    for msg in messages:
+        candidate = json.dumps(kept + [msg], separators=(",", ":"))
+        if len(candidate.encode("utf-8")) <= max_bytes:
+            kept.append(msg)
+        else:
+            break
+
+    if not kept and messages:
+        # Even the first message is too large — truncate its content.
+        first = dict(messages[0]) if isinstance(messages[0], dict) else messages[0]
+        if isinstance(first, dict) and "content" in first:
+            first["content"] = _truncate_string(
+                str(first["content"]), max_bytes - 200
+            ) + "\n\n[TRUNCATED — message exceeds trace limit]"
+        kept = [first]
+
+    return kept if kept else None
+
+
+def _truncate_single_message(msg: Any, max_bytes: int) -> Any:
+    """Truncate a single message-like object."""
+    if isinstance(msg, dict) and "content" in msg:
+        overhead = len(
+            json.dumps({k: "" for k in msg}, separators=(",", ":")).encode("utf-8")
+        )
+        limit = max(0, max_bytes - overhead - 100)
+        return {**msg, "content": _truncate_string(str(msg["content"]), limit) + "\n\n[TRUNCATED]"}
+    return str(msg)[:max_bytes]
+
+
+def _truncate_string(value: str, max_bytes: int) -> str:
+    """Truncate a string to at most max_bytes when encoded as UTF-8."""
+    if max_bytes <= 0:
+        return ""
+    encoded = value.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value
+    # Walk back from the cut point to avoid splitting a multi-byte character.
+    truncated = encoded[:max_bytes]
+    return truncated.decode("utf-8", errors="ignore")
 
 
 def _v6_attribution(sample: ToolRuntimeSample) -> str:

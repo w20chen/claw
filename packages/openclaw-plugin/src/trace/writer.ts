@@ -30,8 +30,11 @@ export class TraceWriter {
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
+    // Use append mode ("a") instead of write ("w") to avoid truncating
+    // trace data written by other components (e.g. the Python scheduler).
+    // The scheduler is the primary trace writer; this writer is a fallback.
     try {
-      this.fileHandle = await open(this.filePath, "w");
+      this.fileHandle = await open(this.filePath, "a");
     } catch (err) {
       this.logger.warn("trace writer failed to open file", safeError(err));
     }

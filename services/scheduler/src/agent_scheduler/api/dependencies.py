@@ -52,7 +52,10 @@ def build_state(config: SchedulerConfig | None = None) -> AppState:
         executions=ExecutionRegistry(),
         metrics=Metrics(),
         topology=read_topology(),
-        trace_writer=AgentTestBenchTraceWriter(cfg.trace_dir),
+        trace_writer=AgentTestBenchTraceWriter(
+            cfg.trace_dir,
+            max_messages_bytes=cfg.trace_max_messages_bytes,
+        ),
         _completed_tool_event_ids=set(),
         _recent_samples=[],
     )
