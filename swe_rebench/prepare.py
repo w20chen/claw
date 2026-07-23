@@ -159,6 +159,10 @@ if [ "$READY" -eq 0 ]; then
 fi
 
 echo "[claw] === Phase 3: configure OpenClaw ==="
+# Save openclaw help so we can debug command discovery
+openclaw --help 2>&1 > "$TRACE_DIR/openclaw-help.txt" || true
+openclaw --version 2>&1 >> "$TRACE_DIR/openclaw-help.txt" || true
+
 openclaw onboard --non-interactive \
     --mode local --auth-choice vllm \
     --custom-base-url "http://127.0.0.1:$SIDECAR_PORT/v1" \
@@ -173,12 +177,17 @@ fi
 
 echo "[claw] === Phase 4: run agent (max_turns=__MAX_TURNS__) ==="
 AGENT_EXIT=0
-AGENT_RUN=0
+# Save help text for debugging
+openclaw --help 2>&1 | head -60 > "$TRACE_DIR/openclaw-help.txt" || true
+
 if [ -n "${PROBLEM_STATEMENT:-}" ]; then
     echo "$PROBLEM_STATEMENT" > /tmp/problem_statement.txt
-    # Detect the correct openclaw agent subcommand.
+
+    # Try each known agent invocation pattern.
+    # Save stderr for each attempt to help debug.
+    AGENT_RUN=0
     for _cmd in agent chat task; do
-        if openclaw "$_cmd" --help &>/dev/null 2>&1; then
+        if openclaw "$_cmd" --help >/dev/null 2>&1; then
             AGENT_RUN=1
             echo "[claw] using: openclaw $_cmd"
             openclaw "$_cmd" \
@@ -186,18 +195,19 @@ if [ -n "${PROBLEM_STATEMENT:-}" ]; then
                 --model "__MODEL_FULL__" \
                 --max-turns __MAX_TURNS__ \
                 --allowed-tools "exec,read,write,edit,grep,glob,bash,ls" \
-                __EXTRA__ || AGENT_EXIT=$?
+                __EXTRA__ 2>"$TRACE_DIR/agent-stderr.txt" || AGENT_EXIT=$?
             break
         fi
     done
+
     if [ "$AGENT_RUN" -eq 0 ]; then
-        # Fallback: try stdin
-        echo "[claw] no known subcommand, trying stdin..."
+        # Fallback 1: openclaw with no subcommand, prompt via stdin
+        echo "[claw] trying: openclaw < prompt (stdin mode)"
         openclaw \
             --model "__MODEL_FULL__" \
             --max-turns __MAX_TURNS__ \
             --allowed-tools "exec,read,write,edit,grep,glob,bash,ls" \
-            __EXTRA__ < /tmp/problem_statement.txt || AGENT_EXIT=$?
+            __EXTRA__ < /tmp/problem_statement.txt 2>"$TRACE_DIR/agent-stderr.txt" || AGENT_EXIT=$?
     fi
 else
     echo "[claw] WARNING: PROBLEM_STATEMENT not set"
