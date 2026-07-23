@@ -420,6 +420,91 @@ def test_llm_proxy_records_full_request_and_response(tmp_path: Path, monkeypatch
     assert data["raw_response"]["choices"][0]["message"]["content"] == "world"
 
 
+def test_llm_proxy_reconstructs_streaming_tool_calls(tmp_path: Path, monkeypatch) -> None:
+    client, trace_path = _trace_proxy_client(tmp_path)
+
+    class FakeStream:
+        status_code = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def aiter_bytes(self):
+            chunks = [
+                {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": "call-1",
+                                        "type": "function",
+                                        "function": {"name": "exec", "arguments": '{"command":"py'},
+                                    }
+                                ]
+                            },
+                            "finish_reason": None,
+                        }
+                    ]
+                },
+                {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "tool_calls": [
+                                    {"index": 0, "function": {"arguments": 'thon --version"}'}}
+                                ]
+                            },
+                            "finish_reason": "tool_calls",
+                        }
+                    ]
+                },
+            ]
+            for chunk in chunks:
+                yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+            yield b"data: [DONE]\n\n"
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def stream(self, method, url, headers=None, content=None):
+            return FakeStream()
+
+    monkeypatch.setattr("agent_scheduler.llm_proxy.httpx.AsyncClient", FakeAsyncClient)
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "test-model",
+            "stream": True,
+            "messages": [{"role": "user", "content": "run python"}],
+        },
+    )
+
+    assert response.status_code == 200
+    records = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+    data = [record for record in records if record.get("action_type") == "llm_call"][0]["data"]
+    assert data["content"] == ""
+    message = data["raw_response"]["message"]
+    assert message["finish_reason"] == "tool_calls"
+    assert message["tool_calls"][0]["id"] == "call-1"
+    assert message["tool_calls"][0]["function"]["name"] == "exec"
+    assert message["tool_calls"][0]["function"]["arguments"] == '{"command":"python --version"}'
+
+
 def test_execution_registration_round_trip(tmp_path: Path) -> None:
     client = _client(tmp_path)
     response = client.post(

@@ -144,7 +144,10 @@ async def _stream_chat(
             trace_writer,
             action_id=action_id,
             payload=payload,
-            response_payload={"stream_chunks": chunks, "content": _content_from_stream_chunks(chunks)},
+                response_payload={
+                    "stream_chunks": chunks,
+                    "message": _message_from_stream_chunks(chunks),
+                },
             started_at=started_at,
             status_code=status_code,
             stream=True,
@@ -252,6 +255,9 @@ def _content_from_response(response_payload: Any | None) -> Any | None:
     if response_payload is None:
         return None
     if isinstance(response_payload, dict) and "stream_chunks" in response_payload:
+        message = response_payload.get("message")
+        if isinstance(message, dict):
+            return message.get("content")
         return response_payload.get("content")
     if not isinstance(response_payload, dict):
         return None
@@ -268,7 +274,13 @@ def _content_from_response(response_payload: Any | None) -> Any | None:
 
 
 def _content_from_stream_chunks(chunks: list[dict[str, Any]]) -> str:
+    return str(_message_from_stream_chunks(chunks).get("content") or "")
+
+
+def _message_from_stream_chunks(chunks: list[dict[str, Any]]) -> dict[str, Any]:
     parts: list[str] = []
+    tool_calls: dict[int, dict[str, Any]] = {}
+    finish_reason: str | None = None
     for chunk in chunks:
         choices = chunk.get("choices")
         if not isinstance(choices, list):
@@ -276,9 +288,43 @@ def _content_from_stream_chunks(chunks: list[dict[str, Any]]) -> str:
         for choice in choices:
             if not isinstance(choice, dict):
                 continue
+            if isinstance(choice.get("finish_reason"), str):
+                finish_reason = choice["finish_reason"]
             delta = choice.get("delta")
             if isinstance(delta, dict) and isinstance(delta.get("content"), str):
                 parts.append(delta["content"])
+            if isinstance(delta, dict) and isinstance(delta.get("tool_calls"), list):
+                _merge_tool_call_deltas(tool_calls, delta["tool_calls"])
             elif isinstance(choice.get("text"), str):
                 parts.append(choice["text"])
-    return "".join(parts)
+    message: dict[str, Any] = {"role": "assistant", "content": "".join(parts)}
+    if tool_calls:
+        message["tool_calls"] = [tool_calls[index] for index in sorted(tool_calls)]
+    if finish_reason is not None:
+        message["finish_reason"] = finish_reason
+    return message
+
+
+def _merge_tool_call_deltas(
+    output: dict[int, dict[str, Any]], deltas: list[Any]
+) -> None:
+    for item in deltas:
+        if not isinstance(item, dict):
+            continue
+        index = item.get("index")
+        if not isinstance(index, int):
+            index = len(output)
+        current = output.setdefault(index, {"index": index, "type": "function", "function": {}})
+        if isinstance(item.get("id"), str):
+            current["id"] = item["id"]
+        if isinstance(item.get("type"), str):
+            current["type"] = item["type"]
+        function = item.get("function")
+        if isinstance(function, dict):
+            current_function = current.setdefault("function", {})
+            if isinstance(function.get("name"), str):
+                current_function["name"] = function["name"]
+            if isinstance(function.get("arguments"), str):
+                current_function["arguments"] = (
+                    str(current_function.get("arguments") or "") + function["arguments"]
+                )
