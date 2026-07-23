@@ -73,6 +73,15 @@ except ImportError as e:
     print(json.dumps({{"error": f"Cannot import datasets: {{e}}. Install: pip install datasets"}}))
     sys.exit(1)
 
+# datasets>=3.0 renamed 'List' -> 'LargeList', breaking older datasets.
+# Register 'List' as an alias so old-format datasets (like SWE-rebench) load.
+try:
+    import datasets.features.features as _f
+    if "List" not in _f._FEATURE_TYPES and "LargeList" in _f._FEATURE_TYPES:
+        _f._FEATURE_TYPES["List"] = _f._FEATURE_TYPES["LargeList"]
+except Exception:
+    pass
+
 ds = load_dataset("{HF_DATASET}", split="{HF_SPLIT}")
 tasks = []
 for i, row in enumerate(ds):
