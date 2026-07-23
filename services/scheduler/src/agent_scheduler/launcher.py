@@ -209,6 +209,16 @@ def _prepare_cgroup(
     mems: str | None,
     profiling: object,
 ) -> str | None:
+    """Create a cgroup for execution_id, returning its path or None.
+
+    Tries candidate roots in priority order until one succeeds:
+      1. CLAW_CGROUP_ROOT (env override)
+      2. /sys/fs/cgroup/claw           (root / pre-delegated)
+      3. /sys/fs/cgroup/user.slice/    (systemd, writable by non-root)
+
+    Set CLAW_ENABLE_CGROUP=0 to disable cgroup entirely.
+    Set CLAW_CGROUP_REQUIRED=1 to fail hard when no root is writable.
+    """
     required = _env_enabled("CLAW_CGROUP_REQUIRED")
     if not _supports_posix_controls():
         if required:
@@ -219,37 +229,84 @@ def _prepare_cgroup(
     explicit = _explicit_cgroup_path()
     if explicit:
         return explicit
-    root = os.environ.get("CLAW_CGROUP_ROOT")
-    if not root:
-        # Default cgroup on.  Set CLAW_ENABLE_CGROUP=0 to opt out.
+
+    # Collect candidate roots (env override short-circuits to a single candidate).
+    env_root = os.environ.get("CLAW_CGROUP_ROOT")
+    if env_root:
+        candidates = [env_root]
+    else:
         if not required and os.environ.get("CLAW_ENABLE_CGROUP", "1") != "1":
             return None
-        root = "/sys/fs/cgroup/claw"
+        candidates = _cgroup_root_candidates()
+
+    last_error: str | None = None
+    for root in candidates:
+        try:
+            return _create_cgroup_at(root, execution_id, cpu_set, mems)
+        except OSError as exc:
+            last_error = str(exc)
+            if _env_enabled("CLAW_CGROUP_DEBUG"):
+                print(f"execution environment: cgroup unavailable at {root}: {exc}", file=sys.stderr)
+
+    if required:
+        raise RuntimeError(
+            f"cgroup_unavailable: no writable root among {candidates}; last error: {last_error}"
+        )
+    return None
+
+
+def _cgroup_root_candidates() -> list[str]:
+    """Return candidate cgroup root paths in priority order.
+
+    Priority:
+      1. /sys/fs/cgroup/claw                  — root or pre-delegated
+      2. /sys/fs/cgroup/user.slice/.../claw   — systemd user slice (non-root)
+    """
+    candidates = ["/sys/fs/cgroup/claw"]
     try:
-        root_path = Path(root)
-        cgroup_path = root_path / _safe_execution_id(execution_id)
-        root_path.mkdir(parents=True, exist_ok=True)
-        _enable_cgroup_controller(root_path, "cpuset")
-        cgroup_path.mkdir(mode=0o700, exist_ok=True)
-        if mems:
-            _write_file(cgroup_path / "cpuset.mems", mems)
-        if cpu_set:
-            _write_file(cgroup_path / "cpuset.cpus", cpu_set)
-        return str(cgroup_path)
-    except OSError as exc:
-        if _env_enabled("CLAW_CGROUP_REQUIRED"):
-            raise RuntimeError(f"cgroup_unavailable root={root}: {exc}") from exc
-        if _env_enabled("CLAW_CGROUP_DEBUG"):
-            print(f"execution environment: cgroup unavailable at {root}: {exc}", file=sys.stderr)
-        return None
+        uid = os.getuid()
+        if uid > 0:
+            candidates.append(f"/sys/fs/cgroup/user.slice/user-{uid}.slice/claw")
+    except (AttributeError, OSError):
+        pass
+    return candidates
+
+
+def _create_cgroup_at(
+    root: str,
+    execution_id: str,
+    cpu_set: str | None,
+    mems: str | None,
+) -> str:
+    """Create a per-execution cgroup under *root*.  Raises OSError on failure."""
+    root_path = Path(root)
+    cgroup_path = root_path / _safe_execution_id(execution_id)
+    root_path.mkdir(parents=True, exist_ok=True)
+    _enable_cgroup_controller(root_path, "cpuset")
+    cgroup_path.mkdir(mode=0o700, exist_ok=True)
+    if mems:
+        _write_file(cgroup_path / "cpuset.mems", mems)
+    if cpu_set:
+        _write_file(cgroup_path / "cpuset.cpus", cpu_set)
+    return str(cgroup_path)
 
 
 def _cleanup_cgroup(cgroup_path: str | None) -> None:
+    """Remove a per-execution cgroup directory.
+
+    Only cleans up directories created under our managed roots
+    (/sys/fs/cgroup/claw or user slice).  Explicit CLAW_CGROUP_PATH
+    directories are left alone.
+    """
     if not cgroup_path:
         return
-    root = os.environ.get("CLAW_CGROUP_ROOT")
     explicit = os.environ.get("CLAW_CGROUP_PATH")
-    if explicit or not root:
+    if explicit and cgroup_path.startswith(explicit.rstrip("/")):
+        # User-provided path — don't touch.
+        return
+    # Only clean up under our known managed prefixes.
+    managed = _cgroup_root_candidates()
+    if not any(cgroup_path.startswith(root.rstrip("/")) for root in managed):
         return
     try:
         Path(cgroup_path).rmdir()

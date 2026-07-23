@@ -43,6 +43,9 @@ class AgentTestBenchTraceWriter:
         self._seq_counters: dict[str, int] = {}
         self._files: dict[str, Path] = {}
         self._metadata_written: set[str] = set()  # track files that already have metadata
+        # Maps tool_call_id → parent LLM span_id for resolving parent_span_id
+        # on tool spans. Populated when an LLM span produces tool calls.
+        self._tool_parent_map: dict[str, str] = {}
         self.trace_dir.mkdir(parents=True, exist_ok=True)
 
     def _file_for_run(self, run_id: str | None, session_id: str | None, agent_id: str | None) -> Path | None:
@@ -105,7 +108,10 @@ class AgentTestBenchTraceWriter:
     ) -> None:
         trace_id = event.run_id or self._instance_id
         span_id = event.tool_call_id or event.event_id
-        parent_span_id = None
+        # Resolve parent LLM span: look up by tool_call_id, then by event_id.
+        parent_span_id = self._tool_parent_map.get(
+            event.tool_call_id or ""
+        ) or self._tool_parent_map.get(event.event_id)
         run_id = event.run_id
         session_id = event.session_id
         agent_id = event.agent_id or _agent_id_from_session_key(event.session_key)
@@ -156,6 +162,20 @@ class AgentTestBenchTraceWriter:
             },
         })
 
+        # Compute monitor coverage fields from the runtime sample.
+        _mon_start_wall, _mon_end_wall, _mon_start_mono, _mon_end_mono = (
+            _monitor_timestamps_ns(sample)
+        )
+        _action_dur_ns = int(duration_ns)
+        _cov_dur_ns, _cov_ratio, _cov_reason = _coverage(
+            action_start_wall_ns=int(wall_start_ns),
+            action_end_wall_ns=int(wall_end_ns),
+            action_duration_ns=_action_dur_ns,
+            monitor_start_wall_ns=_mon_start_wall,
+            monitor_end_wall_ns=_mon_end_wall,
+            has_pid=has_pid,
+        )
+
         # span_end
         self._append(filepath, {
             "schema_version": 6,
@@ -186,14 +206,14 @@ class AgentTestBenchTraceWriter:
                 "attribution_status": _v6_attribution(sample),
                 "scope": "cgroup" if (scope is not None and scope.cgroup_path) else ("process_tree" if has_pid else "none"),
                 "quality": "unknown" if sample.sampling_quality == "unknown" else "partial",
-                "monitor_start_wall_time_ns": None,
-                "monitor_end_wall_time_ns": None,
-                "monitor_start_monotonic_ns": None,
-                "monitor_end_monotonic_ns": None,
-                "coverage_duration_ns": None,
+                "monitor_start_wall_time_ns": str(_mon_start_wall) if _mon_start_wall is not None else None,
+                "monitor_end_wall_time_ns": str(_mon_end_wall) if _mon_end_wall is not None else None,
+                "monitor_start_monotonic_ns": str(_mon_start_mono) if _mon_start_mono is not None else None,
+                "monitor_end_monotonic_ns": str(_mon_end_mono) if _mon_end_mono is not None else None,
+                "coverage_duration_ns": str(_cov_dur_ns) if _cov_dur_ns is not None else None,
                 "action_duration_ns": duration_ns,
-                "coverage_ratio": None,
-                "coverage_reason": "full_window" if has_pid else "pid_unavailable",
+                "coverage_ratio": _cov_ratio,
+                "coverage_reason": _cov_reason,
                 "cpu_time_s": sample.cpu_time_delta_s,
                 "rss_peak_bytes": sample.rss_bytes_peak,
             },
@@ -296,6 +316,13 @@ class AgentTestBenchTraceWriter:
                 "coverage_reason": "pid_unavailable",
             },
         })
+
+        # Register tool_call_id → parent span mapping so child tool spans
+        # can resolve their parent_span_id.  Handles both direct OpenAI-style
+        # tool_calls and content-wrapped proxy formats.
+        output_content = _first_present(event.raw_output, proxy_data.get("content"))
+        for tc_id in _extract_tool_call_ids(output_content):
+            self._tool_parent_map[tc_id] = span_id
 
     def record_llm_proxy_call(
         self,
@@ -447,6 +474,104 @@ def _first_present(*values: Any) -> Any | None:
         if value is not None and value != "":
             return value
     return None
+
+
+def _extract_tool_call_ids(output_content: Any) -> list[str]:
+    """Extract tool_call IDs from an LLM output content value.
+
+    Handles multiple shapes produced by the proxy and OpenClaw hooks:
+      - {"tool_calls": [{"id": "..."}, ...]}   (direct tool-calls dict)
+      - [{"id": "..."}, ...]                    (bare tool-calls list)
+      - {"choices": [{"message": {"tool_calls": [...]}}]} (raw API response)
+    """
+    ids: list[str] = []
+    if not isinstance(output_content, dict):
+        return ids
+    # Direct tool_calls wrapper (most common proxy format).
+    tool_calls = output_content.get("tool_calls")
+    if isinstance(tool_calls, list):
+        ids.extend(_collect_ids(tool_calls))
+    # Raw API response shape (choices[0].message.tool_calls).
+    for choice in _list_value(output_content.get("choices")):
+        if not isinstance(choice, dict):
+            continue
+        msg = choice.get("message")
+        if isinstance(msg, dict):
+            ids.extend(_collect_ids(_list_value(msg.get("tool_calls"))))
+    # Deduplicate while preserving order.
+    seen: set[str] = set()
+    unique: list[str] = []
+    for tid in ids:
+        if tid not in seen:
+            seen.add(tid)
+            unique.append(tid)
+    return unique
+
+
+def _collect_ids(items: list[Any]) -> list[str]:
+    ids: list[str] = []
+    for item in items:
+        if isinstance(item, dict) and isinstance(item.get("id"), str):
+            ids.append(item["id"])
+    return ids
+
+
+def _list_value(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _monitor_timestamps_ns(sample: ToolRuntimeSample) -> tuple[int | None, int | None, int | None, int | None]:
+    """Extract monitor start/end timestamps (wall + monotonic) in nanoseconds.
+
+    Returns (monitor_start_wall_ns, monitor_end_wall_ns,
+             monitor_start_mono_ns, monitor_end_mono_ns).
+    """
+    msw = int(sample.monitor_start_wall_s * 1_000_000_000) if sample.monitor_start_wall_s > 0 else None
+    mew = int(sample.monitor_end_wall_s * 1_000_000_000) if sample.monitor_end_wall_s > 0 else None
+    msm = int(sample.monitor_start_monotonic_s * 1_000_000_000) if sample.monitor_start_monotonic_s else None
+    mem = int(sample.monitor_end_monotonic_s * 1_000_000_000) if sample.monitor_end_monotonic_s else None
+    return msw, mew, msm, mem
+
+
+def _coverage(
+    *,
+    action_start_wall_ns: int,
+    action_end_wall_ns: int,
+    action_duration_ns: int,
+    monitor_start_wall_ns: int | None,
+    monitor_end_wall_ns: int | None,
+    has_pid: bool,
+) -> tuple[int | None, float | None, str]:
+    """Compute coverage duration, ratio, and reason.
+
+    Follows the trace schema v6 formula:
+      coverage_duration_ns = max(0, min(action_end, monitor_end) - max(action_start, monitor_start))
+      coverage_ratio = coverage_duration_ns / action_duration_ns
+    """
+    if not has_pid:
+        return None, None, "pid_unavailable"
+    if monitor_start_wall_ns is None or monitor_end_wall_ns is None:
+        return None, None, "clock_data_missing"
+
+    overlap_ns = max(
+        0,
+        min(action_end_wall_ns, monitor_end_wall_ns)
+        - max(action_start_wall_ns, monitor_start_wall_ns),
+    )
+
+    if action_duration_ns <= 0:
+        return overlap_ns, None, "full_window" if overlap_ns > 0 else "pid_unavailable"
+
+    ratio = overlap_ns / action_duration_ns
+
+    if ratio >= 0.99:
+        reason = "full_window"
+    elif ratio <= 0.0:
+        reason = "pid_unavailable"
+    else:
+        reason = "pid_registered_late"
+
+    return overlap_ns, ratio, reason
 
 
 def _truncate_messages(messages: Any, max_bytes: int) -> Any:

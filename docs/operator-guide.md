@@ -284,10 +284,69 @@ The default run creates or appends these files under `~/claw/data`:
   `messages_in`, `content`, `raw_request`, and `raw_response`; `tool_exec`
   records contain `tool_args`, `tool_result`, and `resource_usage`.
 
-## 8. Optional cgroup Scope
+## 8. Cgroup Resource Monitoring (Default)
 
-On Linux, managed-wrapper can use cgroup-v2 counters if you provide a writable
-root:
+The sidecar uses Linux cgroup v2 for per-execution resource monitoring by
+default: CPU time, memory RSS, disk I/O, and context switches are read from
+`cpu.stat`, `memory.current`, and `io.stat` inside a per-execution cgroup
+directory.  cgroup monitoring provides more accurate and complete resource
+attribution than PID process-tree sampling alone.
+
+### Automatic Cgroup Root Selection
+
+`claw-launch` tries candidate cgroup roots in priority order until one succeeds:
+
+| Priority | Path | Works when |
+|----------|------|------------|
+| 1 (env) | `CLAW_CGROUP_ROOT` | Explicitly configured |
+| 2 | `/sys/fs/cgroup/claw` | Root process or pre-delegated by admin |
+| 3 | `/sys/fs/cgroup/user.slice/user-<UID>.slice/claw` | systemd, non-root user (default) |
+
+On any modern Linux distribution with systemd (Ubuntu 20.04+, Debian 11+,
+Fedora, Arch, etc.), the **user slice fallback (priority 3) works out of the
+box** — no root privileges required.  The user slice is automatically delegated
+by systemd at login and is writable by the owning user.
+
+### Verify cgroup Is Active
+
+After a run, check the tool span in `trace.jsonl`:
+
+```json
+"execution": {
+  "cgroup_path": "/sys/fs/cgroup/user.slice/user-1000.slice/claw/exec_abc123"
+},
+"resources": {
+  "scope": "cgroup"
+}
+```
+
+If `cgroup_path` is `null` and `scope` is `"process_tree"`, the launcher fell
+back to PID monitoring.  Enable debug logging to see why:
+
+```bash
+export CLAW_CGROUP_DEBUG=1
+```
+
+This prints each candidate root and its error to stderr.
+
+### Disable cgroup
+
+```bash
+export CLAW_ENABLE_CGROUP=0
+```
+
+### Force cgroup (Fail Hard)
+
+```bash
+export CLAW_CGROUP_REQUIRED=1
+```
+
+With this set, `claw-launch` exits with a visible `cgroup_unavailable` error
+instead of silently falling back to PID monitoring.
+
+### Custom cgroup Root
+
+Point to a pre-created delegated cgroup:
 
 ```bash
 sudo mkdir -p /sys/fs/cgroup/claw
@@ -296,38 +355,17 @@ echo "$$" | sudo tee /sys/fs/cgroup/claw/cgroup.procs >/dev/null
 export CLAW_CGROUP_ROOT=/sys/fs/cgroup/claw
 ```
 
-The `tee` line moves the current shell into the delegated cgroup root. Without
-that, cgroup-v2 can reject moving child processes into sub-cgroups with
-`Permission denied` even when `/sys/fs/cgroup/claw` is owned by your user.
-Then rerun the OpenClaw task. `resource_usage.monitor_source` should become
-`cgroup-v2` when the launcher successfully registers a cgroup scope.
-If the trace still shows `attr=pid` or `monitor_source=psutil-process-tree`,
-the task is still being monitored by PID process tree. That is usable, but it
-means either the OpenClaw/plugin process did not inherit `CLAW_CGROUP_ROOT`, or
-the launcher could not create/read the cgroup. Rebuild and relink the plugin
-after updates so it forwards `CLAW_CGROUP_ROOT` into wrapped `exec` calls.
-If required mode reports `[Errno 13] Permission denied` while writing
-`cgroup.procs`, rerun the `echo "$$" | sudo tee .../cgroup.procs` delegation
-line in the same shell that starts `openclaw agent`.
-If required mode reports `[Errno 95] Operation not supported`, the current
-cgroup hierarchy does not support moving the tool process into the created
-sub-cgroup. This is a host cgroup delegation/topology issue, not a recorder
-sampling issue. Unset `CLAW_CGROUP_REQUIRED` to continue with PID process-tree
-monitoring, or choose a different delegated cgroup root that supports process
-migration.
+The `tee` line moves the current shell into the delegated cgroup root so that
+cgroup-v2 allows moving child processes into sub-cgroups.
 
-For cgroup troubleshooting, make fallback explicit:
+### Troubleshooting
 
-```bash
-export CLAW_CGROUP_REQUIRED=1
-```
-
-With this set, `claw-launch` exits with a visible `cgroup_unavailable` error
-instead of silently falling back to PID monitoring. It also forces the launcher
-to try cgroup even if profiling metadata says cgroup is disabled, and verifies
-that the child process actually appears in `cgroup.procs`. Join failures are
-reported from the parent process as `cgroup_join_failed` or
-`cgroup_join_missing`, so they should include the failing path and child PID.
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| `cgroup_path: null` everywhere | Non-systemd host or ancient kernel | Pre-create `/sys/fs/cgroup/claw` with `sudo` |
+| `Permission denied` on `cgroup.procs` | Delegation incomplete | Rerun the `echo "$$" \| sudo tee` delegation line |
+| `Operation not supported` (Errno 95) | cgroup controller not available in parent | Choose a different cgroup root or disable cgroup |
+| `scope: "process_tree"` despite cgroup | `CLAW_ENABLE_CGROUP=0` or profiling disabled | Check env vars; set `CLAW_CGROUP_DEBUG=1` |
 
 ## 9. Troubleshooting
 

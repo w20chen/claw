@@ -124,15 +124,29 @@ async def _stream_chat(
     chunks: list[dict[str, Any]] = []
     status_code = 200
     error: str | None = None
+    # Buffer for SSE data that may span across HTTP chunk boundaries.
+    # httpx's aiter_bytes() does not guarantee SSE-event-aligned chunks.
+    sse_buffer = b""
     try:
         async with httpx.AsyncClient(timeout=None) as client:
             async with client.stream("POST", upstream, headers=headers, content=body) as response:
                 status_code = response.status_code
                 async for chunk in response.aiter_bytes():
-                    for event in _parse_sse_chunk(chunk):
+                    sse_buffer += chunk
+                    # Extract complete SSE events (delimited by double-newline).
+                    # Keep any trailing partial event in the buffer for the
+                    # next iteration so fragments are never dropped.
+                    events, sse_buffer = _parse_sse_buffer(sse_buffer)
+                    for event in events:
                         if event is not None:
                             chunks.append(event)
                     yield chunk
+        # Flush any remaining partial event after the stream ends.
+        if sse_buffer:
+            events, _ = _parse_sse_buffer(sse_buffer + b"\n\n")
+            for event in events:
+                if event is not None:
+                    chunks.append(event)
     except Exception as exc:
         status_code = 502
         error = str(exc)
@@ -230,22 +244,61 @@ def _json_or_text(content: bytes) -> Any:
         return content.decode("utf-8", errors="replace")
 
 
-def _parse_sse_chunk(chunk: bytes) -> list[dict[str, Any] | None]:
+def _parse_sse_buffer(buffer: bytes) -> tuple[list[dict[str, Any] | None], bytes]:
+    """Parse complete SSE events from a byte buffer.
+
+    SSE events are delimited by double-newline (\\n\\n).  Events that span
+    across HTTP chunk boundaries are kept in the returned remainder buffer
+    so they can be reassembled when the next chunk arrives.
+
+    Returns (events, remainder) where remainder is the trailing incomplete
+    event bytes (may be empty).
+    """
     events: list[dict[str, Any] | None] = []
-    text = chunk.decode("utf-8", errors="replace")
-    for line in text.splitlines():
-        line = line.strip()
-        if not line.startswith("data:"):
+    # Find the last complete event boundary.
+    # An SSE event ends with \\n\\n; everything after the last \\n\\n is
+    # a partial event that needs more data.
+    last_delim = buffer.rfind(b"\n\n")
+    if last_delim == -1:
+        # No complete event yet — whole buffer is partial, keep it all.
+        return events, buffer
+
+    complete = buffer[: last_delim + 2]  # include the trailing \n\n
+    remainder = buffer[last_delim + 2:]   # partial event after last delimiter
+
+    text = complete.decode("utf-8", errors="replace")
+    # SSE events may use \n or \r\n; normalize to \n for splitting.
+    current_data: list[str] = []
+    for raw_line in text.split("\n"):
+        line = raw_line.strip()
+        if not line:
+            # Empty line after data lines = end of one SSE event.
+            if current_data:
+                _flush_sse_event("".join(current_data), events)
+                current_data = []
             continue
-        data = line[len("data:") :].strip()
-        if not data or data == "[DONE]":
-            events.append(None)
-            continue
-        try:
-            events.append(json.loads(data))
-        except json.JSONDecodeError:
-            pass
-    return events
+        if line.startswith("data:"):
+            current_data.append(line[len("data:"):].strip())
+        # Non-data fields (event:, id:, retry:) are ignored for trace purposes.
+    # Flush any remaining data lines (shouldn't happen with proper \n\n delim).
+    if current_data:
+        _flush_sse_event("".join(current_data), events)
+
+    return events, remainder
+
+
+def _flush_sse_event(data_str: str, events: list[dict[str, Any] | None]) -> None:
+    """Parse a single SSE data payload into an event and append to the list."""
+    if not data_str or data_str == "[DONE]":
+        events.append(None)
+        return
+    try:
+        events.append(json.loads(data_str))
+    except json.JSONDecodeError:
+        # Malformed JSON in SSE event — log and skip rather than silently drop.
+        import logging
+        _log = logging.getLogger(__name__)
+        _log.debug("llm_proxy: skipping unparseable SSE data: %.200s", data_str)
 
 
 def _content_from_response(response_payload: Any | None) -> Any | None:

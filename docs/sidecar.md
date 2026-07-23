@@ -122,7 +122,9 @@ Stored sample fields include:
 - average disk and network throughput in bytes/second
 - sampling metadata: interval, point count, quality, and timeline truncation
 - cgroup-v2 CPU time, memory, I/O, process count, and context-switch deltas
-  when a trusted scope includes `kind: "cgroup-v2"` and `cgroup_path`
+  when a trusted scope includes `kind: "cgroup-v2"` and `cgroup_path`.
+  cgroup monitoring is **enabled by default** on Linux via the systemd user
+  slice; see [Operator Guide](operator-guide.md#8-cgroup-resource-monitoring-default).
 - best-effort network rx/tx deltas from `/proc/<pid>/net/dev`
 - predicted `resource_class`
 

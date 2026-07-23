@@ -20,6 +20,10 @@ class ToolRuntimeSample:
     ended_at: float
     duration_ms: int
     monitor_duration_ms: int
+    monitor_start_wall_s: float
+    monitor_end_wall_s: float
+    monitor_start_monotonic_s: float | None
+    monitor_end_monotonic_s: float | None
     cpu_time_delta_s: float | None
     rss_bytes_before: int | None
     rss_bytes_after: int | None
@@ -161,6 +165,10 @@ class RealtimeToolMonitor:
             ended_at=wall_ended_at,
             duration_ms=completion.duration_ms,
             monitor_duration_ms=max(0, int((end.monotonic_s - start.monotonic_s) * 1000)),
+            monitor_start_wall_s=start.captured_at,
+            monitor_end_wall_s=end.captured_at,
+            monitor_start_monotonic_s=start.monotonic_s if start.available else None,
+            monitor_end_monotonic_s=end.monotonic_s if end.available else None,
             cpu_time_delta_s=cpu_delta,
             rss_bytes_before=start.rss_bytes,
             rss_bytes_after=end.rss_bytes,
