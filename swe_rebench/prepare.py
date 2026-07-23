@@ -177,20 +177,16 @@ fi
 
 echo "[claw] === Phase 4: run agent (max_turns=__MAX_TURNS__) ==="
 AGENT_EXIT=0
-# Save help text for debugging
+# Save help for debugging
 openclaw --help 2>&1 | head -60 > "$TRACE_DIR/openclaw-help.txt" || true
+openclaw agent --help 2>&1 > "$TRACE_DIR/agent-help.txt" || true
 
 if [ -n "${PROBLEM_STATEMENT:-}" ]; then
-    echo "$PROBLEM_STATEMENT" > /tmp/problem_statement.txt
-
-    # openclaw agent --local: runs embedded agent (no Gateway needed).
-    # Prompt is a positional argument, NOT --prompt-file.
-    echo "[claw] running: openclaw agent --local"
+    echo "[claw] running: openclaw agent --local __MODEL_FULL__ \"<prompt>\""
+    # openclaw agent: model is positional arg, prompt is positional arg.
+    # Options we know work: --local, --allowed-tools
     openclaw agent --local \
-        --model "__MODEL_FULL__" \
-        --max-turns __MAX_TURNS__ \
-        --allowed-tools "exec,read,write,edit,grep,glob,bash,ls" \
-        __EXTRA__ \
+        __MODEL_FULL__ \
         "$(cat /tmp/problem_statement.txt)" \
         2>"$TRACE_DIR/agent-stderr.txt" || AGENT_EXIT=$?
 else
@@ -370,10 +366,7 @@ set -euo pipefail
 echo "[claw] running agent (fallback)..."
 echo "[claw] TASK_INSTANCE_ID=${TASK_INSTANCE_ID:-unknown}"
 exec openclaw agent --local \
-    --model "__MODEL_FULL__" \
-    --max-turns __MAX_TURNS__ \
-    --allowed-tools "exec,read,write,edit,grep,glob,bash,ls" \
-    __EXTRA__ \
+    __MODEL_FULL__ \
     "${PROBLEM_STATEMENT:-Solve the task.}"
 """
 
