@@ -43,55 +43,20 @@ def discover_from_agent_test_bench(
     bench_root: Path,
     sample: int = 0,
 ) -> list[dict[str, Any]]:
-    """Try to list tasks via agent-test-bench's inspect_swebench.py."""
-    inspect_script = bench_root / "scripts" / "inspect_swebench.py"
-    if not inspect_script.exists():
+    """Load tasks from HuggingFace (agent-test-bench path is informational).
+
+    The ``inspect_swebench.py list`` output is a human-readable table
+    that cannot be reliably parsed.  We go straight to the HuggingFace
+    ``datasets`` API via subprocess, which is the same data source
+    agent-test-bench uses internally.
+    """
+    # Verify bench_root exists as a sanity check, but don't depend on it.
+    if not bench_root.exists():
         raise FileNotFoundError(
-            f"inspect_swebench.py not found at {inspect_script}. "
-            f"Is agent-test-bench checked out at {bench_root}?"
+            f"agent-test-bench not found at {bench_root}. "
+            f"Set AGENT_TEST_BENCH_ROOT or use --bench-root."
         )
-
-    # First try: use `inspect_swebench.py list` (requires datasets)
-    try:
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(inspect_script),
-                "--benchmark", "swe-rebench",
-                "list",
-            ],
-            cwd=str(bench_root),
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return _parse_list_output(result.stdout, sample)
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass
-
-    # Second try: directly load from HuggingFace
     return _load_from_huggingface(sample)
-
-
-def _parse_list_output(output: str, sample: int = 0) -> list[dict[str, Any]]:
-    """Parse the table output from inspect_swebench.py list."""
-    tasks: list[dict[str, Any]] = []
-    lines = output.strip().splitlines()
-    # The output is typically a table: instance_id | repo | image | ...
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("-") or line.startswith("="):
-            continue
-        # Try to extract instance_id (first column)
-        parts = line.split("|")
-        if len(parts) >= 1:
-            iid = parts[0].strip()
-            if iid and not iid.lower().startswith("instance"):
-                tasks.append({"instance_id": iid})
-    if sample > 0 and len(tasks) > sample:
-        tasks = tasks[:sample]
-    return tasks
 
 
 def _load_from_huggingface(sample: int = 0) -> list[dict[str, Any]]:
