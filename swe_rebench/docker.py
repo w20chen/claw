@@ -1,0 +1,307 @@
+"""
+Docker container management for swe-rebench task execution.
+
+Uses the Docker SDK for Python (``docker`` package) to pull images,
+create containers with volume mounts, wait for completion, and clean up.
+"""
+
+from __future__ import annotations
+
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from swe_rebench.config import DockerConfig
+
+
+@dataclass
+class ContainerResult:
+    """Outcome of a single container run."""
+    task_id: str
+    image: str
+    exit_code: int | None
+    error: str | None = None
+    trace_dir: Path | None = None
+    trace_files: list[Path] = field(default_factory=list)
+    duration_seconds: float = 0.0
+    container_id: str | None = None
+
+
+def get_docker_client(config: DockerConfig) -> Any:
+    """Return a configured Docker SDK client.
+
+    Falls back gracefully if the ``docker`` package is not installed.
+    """
+    try:
+        import docker  # type: ignore[import-untyped]
+        if config.host.startswith("unix://"):
+            return docker.DockerClient(base_url=config.host)
+        return docker.DockerClient(base_url=config.host)
+    except ImportError:
+        _log("[warn] docker Python SDK not installed; using CLI fallback.")
+        return None
+
+
+def pull_image(client: Any, image: str, policy: str = "missing") -> bool:
+    """Pull a Docker image.  Returns True on success."""
+    if policy == "never":
+        return True
+    if client is not None:
+        try:
+            if policy == "always":
+                client.images.pull(image)
+            elif policy == "missing":
+                try:
+                    client.images.get(image)
+                except Exception:
+                    client.images.pull(image)
+            return True
+        except Exception as exc:
+            _log(f"[error] pull {image}: {exc}")
+            return False
+    else:
+        import subprocess
+        flag = "--always" if policy == "always" else ""
+        cmd = f"docker pull {flag} {image}".split()
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return result.returncode == 0
+
+
+def run_container(
+    client: Any,
+    image: str,
+    task_id: str,
+    bundle_dir: Path,
+    trace_dir: Path,
+    problem_statement: str,
+    config: DockerConfig,
+    llm_api_key: str,
+    llm_upstream_url: str,
+    timeout_seconds: int = 1800,
+    env_extra: dict[str, str] | None = None,
+) -> ContainerResult:
+    """Run a single task container and return the result.
+
+    Parameters
+    ----------
+    client:
+        Docker SDK client, or ``None`` for CLI fallback.
+    image:
+        swe-rebench Docker image name.
+    task_id:
+        Unique task identifier (used for trace directory naming).
+    bundle_dir:
+        Host path to the runtime bundle (mounted at ``/claw``).
+    trace_dir:
+        Host path for trace output (mounted at ``/traces``).
+    problem_statement:
+        The task problem statement passed as ``PROBLEM_STATEMENT`` env var.
+    config:
+        Docker configuration.
+    llm_api_key:
+        LLM API key.
+    llm_upstream_url:
+        LLM upstream base URL.
+    timeout_seconds:
+        Maximum wall-clock time for the container.
+    env_extra:
+        Additional environment variables to pass.
+    """
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+
+    environment = {
+        "PROBLEM_STATEMENT": problem_statement,
+        "TASK_INSTANCE_ID": task_id,
+        "LLM_API_KEY": llm_api_key,
+        "LLM_UPSTREAM_BASE_URL": llm_upstream_url,
+    }
+    if env_extra:
+        environment.update(env_extra)
+
+    volumes = {
+        str(bundle_dir.resolve()): {"bind": "/claw", "mode": "ro"},
+        str(trace_dir.resolve()): {"bind": "/traces", "mode": "rw"},
+    }
+
+    if client is not None:
+        return _run_container_sdk(
+            client, image, task_id, volumes, environment,
+            config, timeout_seconds, trace_dir, started,
+        )
+    else:
+        return _run_container_cli(
+            image, task_id, volumes, environment,
+            config, timeout_seconds, trace_dir, started,
+        )
+
+
+def _run_container_sdk(
+    client: Any,
+    image: str,
+    task_id: str,
+    volumes: dict[str, dict[str, str]],
+    environment: dict[str, str],
+    config: DockerConfig,
+    timeout_seconds: int,
+    trace_dir: Path,
+    started: float,
+) -> ContainerResult:
+    """Run via Docker Python SDK."""
+    import docker  # type: ignore[import-untyped]
+
+    mem_limit: str | None = config.memory_limit if config.memory_limit else None
+    nano_cpus: int | None = int(config.cpus * 1e9) if config.cpus else None
+
+    try:
+        container = client.containers.run(
+            image=image,
+            entrypoint=["/claw/entrypoint.sh"],
+            volumes=volumes,
+            environment=environment,
+            detach=True,
+            mem_limit=mem_limit,
+            nano_cpus=nano_cpus,
+            network_mode=config.network_mode,
+            cap_add=config.cap_add if config.cap_add else None,
+            dns=config.dns_servers if config.dns_servers else None,
+        )
+        container_id = container.id
+        _log(f"[{task_id}] container {container_id[:12]} started")
+
+        try:
+            result = container.wait(timeout=timeout_seconds if timeout_seconds > 0 else None)
+            exit_code = result.get("StatusCode", -1)
+        except (docker.errors.APIError, Exception) as exc:
+            _log(f"[{task_id}] wait error: {exc}")
+            try:
+                container.kill()
+            except Exception:
+                pass
+            exit_code = -1
+        finally:
+            try:
+                container.remove(force=True)
+            except Exception:
+                pass
+
+    except Exception as exc:
+        _log(f"[{task_id}] container failed: {exc}")
+        duration = time.monotonic() - started
+        return ContainerResult(
+            task_id=task_id, image=image, exit_code=-1,
+            error=str(exc), trace_dir=trace_dir,
+            duration_seconds=duration,
+        )
+
+    duration = time.monotonic() - started
+    trace_files = _find_traces(trace_dir)
+    return ContainerResult(
+        task_id=task_id, image=image, exit_code=exit_code,
+        trace_dir=trace_dir, trace_files=trace_files,
+        duration_seconds=duration, container_id=container_id,
+    )
+
+
+def _run_container_cli(
+    image: str,
+    task_id: str,
+    volumes: dict[str, dict[str, str]],
+    environment: dict[str, str],
+    config: DockerConfig,
+    timeout_seconds: int,
+    trace_dir: Path,
+    started: float,
+) -> ContainerResult:
+    """Run via ``docker`` CLI as fallback."""
+    import subprocess
+
+    cmd = ["docker", "run", "--rm", "--detach"]
+
+    # Volumes
+    for host_path, vol_cfg in volumes.items():
+        mode = vol_cfg.get("mode", "rw")
+        cmd.extend(["-v", f"{host_path}:{vol_cfg['bind']}:{mode}"])
+
+    # Environment
+    for k, v in environment.items():
+        cmd.extend(["-e", f"{k}={v}"])
+
+    # Entrypoint
+    cmd.extend(["--entrypoint", "/claw/entrypoint.sh"])
+
+    # Resource limits
+    if config.memory_limit:
+        cmd.extend(["--memory", config.memory_limit])
+    if config.cpus:
+        cmd.extend(["--cpus", str(config.cpus)])
+
+    # Network
+    if config.network_mode:
+        cmd.extend(["--network", config.network_mode])
+
+    # DNS
+    for dns in config.dns_servers:
+        cmd.extend(["--dns", dns])
+
+    # Caps
+    for cap in config.cap_add:
+        cmd.extend(["--cap-add", cap])
+
+    cmd.append(image)
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
+        container_id = result.stdout.strip()
+        _log(f"[{task_id}] container {container_id[:12]} started (CLI fallback)")
+
+        # Wait for container
+        wait_cmd = ["docker", "wait", container_id]
+        if timeout_seconds > 0:
+            try:
+                subprocess.run(wait_cmd, check=True, timeout=timeout_seconds)
+            except subprocess.TimeoutExpired:
+                _log(f"[{task_id}] timeout, killing container")
+                subprocess.run(["docker", "kill", container_id], capture_output=True)
+                subprocess.run(["docker", "wait", container_id], capture_output=True)
+        else:
+            subprocess.run(wait_cmd, check=True)
+
+        # Get exit code
+        inspect = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.ExitCode}}", container_id],
+            capture_output=True, text=True, check=True,
+        )
+        exit_code = int(inspect.stdout.strip())
+
+    except subprocess.CalledProcessError as exc:
+        _log(f"[{task_id}] CLI error: {exc}")
+        if exc.stderr:
+            _log(f"  stderr: {exc.stderr.strip()}")
+        duration = time.monotonic() - started
+        return ContainerResult(
+            task_id=task_id, image=image, exit_code=-1,
+            error=str(exc), trace_dir=trace_dir,
+            duration_seconds=duration,
+        )
+
+    duration = time.monotonic() - started
+    trace_files = _find_traces(trace_dir)
+    return ContainerResult(
+        task_id=task_id, image=image, exit_code=exit_code,
+        trace_dir=trace_dir, trace_files=trace_files,
+        duration_seconds=duration, container_id=container_id,
+    )
+
+
+def _find_traces(directory: Path) -> list[Path]:
+    """Find all ``*.jsonl`` trace files in *directory*."""
+    if not directory.exists():
+        return []
+    return sorted(directory.glob("*.jsonl"))
+
+
+def _log(msg: str) -> None:
+    print(msg, file=sys.stderr, flush=True)

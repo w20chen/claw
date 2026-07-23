@@ -1,0 +1,33 @@
+{
+  "plugins": {
+    "entries": {
+      "hardware-scheduler": {
+        "enabled": true,
+        "config": {
+          "endpoint": "http://127.0.0.1:8765",
+          "mode": "observe",
+          "decisionTimeoutMs": 800,
+          "reportTimeoutMs": 800,
+          "failOpen": true,
+          "sendRawParams": false,
+          "recordRawTrace": true,
+          "authTokenEnv": "OPENCLAW_SCHEDULER_TOKEN",
+          "logLevel": "info",
+          "executionBackend": "marker",
+          "launcherPath": "/opt/claw/bin/claw-launch",
+          "instrumentHosts": [
+            "gateway"
+          ],
+          "instrumentTools": [
+            "exec"
+          ],
+          "enableCgroup": false,
+          "enableAffinity": false,
+          "enableNuma": false,
+          "profilingMode": "off",
+          "securityBoundaryAccepted": false
+        }
+      }
+    }
+  }
+}

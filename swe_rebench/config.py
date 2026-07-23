@@ -1,0 +1,197 @@
+"""
+SWE-Rebench integration configuration.
+
+Loads YAML config and applies environment-variable overrides so that
+secrets (API keys) never need to be stored in the config file.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+
+def _env_subst(value: str) -> str:
+    """Replace ``${VAR}`` or ``$VAR`` patterns with environment values."""
+    pattern = re.compile(r"\$\{(\w+)\}|\$(\w+)")
+    def _repl(m: re.Match) -> str:
+        name = m.group(1) or m.group(2)
+        return os.environ.get(name, "")
+    return pattern.sub(_repl, value)
+
+
+@dataclass
+class LLMConfig:
+    api_key: str = ""
+    upstream_base_url: str = "https://api.deepseek.com"
+    model: str = "deepseek-v4-flash"
+    openclaw_model_ref: str = "vllm/deepseek-v4-flash"
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "LLMConfig":
+        return cls(
+            api_key=_env_subst(str(d.get("api_key", ""))),
+            upstream_base_url=_env_subst(str(d.get("upstream_base_url", "https://api.deepseek.com"))),
+            model=str(d.get("model", "deepseek-v4-flash")),
+            openclaw_model_ref=str(d.get("openclaw_model_ref", "vllm/deepseek-v4-flash")),
+        )
+
+
+@dataclass
+class DockerConfig:
+    host: str = "unix:///var/run/docker.sock"
+    memory_limit: str = "8g"
+    cpus: int = 4
+    network_mode: str = "bridge"
+    dns_servers: list[str] = field(default_factory=list)
+    pull_policy: str = "missing"
+    cap_add: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "DockerConfig":
+        return cls(
+            host=str(d.get("host", "unix:///var/run/docker.sock")),
+            memory_limit=str(d.get("memory_limit", "8g")),
+            cpus=int(d.get("cpus", 4)),
+            network_mode=str(d.get("network_mode", "bridge")),
+            dns_servers=list(d.get("dns_servers", [])),
+            pull_policy=str(d.get("pull_policy", "missing")),
+            cap_add=list(d.get("cap_add", [])),
+        )
+
+
+@dataclass
+class BatchConfig:
+    parallelism: int = 4
+    task_timeout_seconds: int = 1800
+    retry_failed: int = 0
+    continue_on_error: bool = True
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "BatchConfig":
+        return cls(
+            parallelism=int(d.get("parallelism", 4)),
+            task_timeout_seconds=int(d.get("task_timeout_seconds", 1800)),
+            retry_failed=int(d.get("retry_failed", 0)),
+            continue_on_error=bool(d.get("continue_on_error", True)),
+        )
+
+
+@dataclass
+class OutputConfig:
+    trace_root: Path = Path("swe_rebench/traces")
+    report_path: Path = Path("swe_rebench/report.json")
+    flat_export_dir: Path | None = None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any], repo_root: Path) -> "OutputConfig":
+        flat_raw = d.get("flat_export_dir", "")
+        flat = Path(flat_raw) if flat_raw else None
+        if flat is not None and not flat.is_absolute():
+            flat = repo_root / flat
+        trace_root = Path(str(d.get("trace_root", "swe_rebench/traces")))
+        if not trace_root.is_absolute():
+            trace_root = repo_root / trace_root
+        report_path = Path(str(d.get("report_path", "swe_rebench/report.json")))
+        if not report_path.is_absolute():
+            report_path = repo_root / report_path
+        return cls(trace_root=trace_root, report_path=report_path, flat_export_dir=flat)
+
+
+@dataclass
+class BundleConfig:
+    plugin_source: str = "packages/openclaw-plugin"
+    scheduler_source: str = "services/scheduler"
+    tool_profiles: str = "examples/tool-profiles.example.json"
+    output_dir: str = "swe_rebench/bundle"
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "BundleConfig":
+        return cls(
+            plugin_source=str(d.get("plugin_source", "packages/openclaw-plugin")),
+            scheduler_source=str(d.get("scheduler_source", "services/scheduler")),
+            tool_profiles=str(d.get("tool_profiles", "examples/tool-profiles.example.json")),
+            output_dir=str(d.get("output_dir", "swe_rebench/bundle")),
+        )
+
+
+@dataclass
+class AgentConfig:
+    max_turns: int = 50
+    extra_args: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "AgentConfig":
+        return cls(
+            max_turns=int(d.get("max_turns", 50)),
+            extra_args=list(d.get("extra_args", [])),
+        )
+
+
+@dataclass
+class RunnerConfig:
+    llm: LLMConfig
+    docker: DockerConfig
+    batch: BatchConfig
+    output: OutputConfig
+    bundle: BundleConfig
+    agent: AgentConfig
+    repo_root: Path
+
+    @classmethod
+    def from_yaml(cls, path: str | Path, repo_root: Path | None = None) -> "RunnerConfig":
+        """Load configuration from a YAML file.
+
+        Falls back gracefully if PyYAML is not installed by trying a
+        basic key-value parser first.  For full YAML support install
+        ``pyyaml``.
+        """
+        path = Path(path)
+        if repo_root is None:
+            repo_root = path.parent.resolve()
+        raw = _load_yaml_safe(path)
+        return cls(
+            llm=LLMConfig.from_dict(raw.get("llm", {})),
+            docker=DockerConfig.from_dict(raw.get("docker", {})),
+            batch=BatchConfig.from_dict(raw.get("batch", {})),
+            output=OutputConfig.from_dict(raw.get("output", {}), repo_root),
+            bundle=BundleConfig.from_dict(raw.get("bundle", {})),
+            agent=AgentConfig.from_dict(raw.get("agent", {})),
+            repo_root=repo_root,
+        )
+
+
+def _load_yaml_safe(path: Path) -> dict[str, Any]:
+    """Load YAML with PyYAML if available, else a minimal parser."""
+    try:
+        import yaml  # type: ignore[import-untyped]
+        with open(path, encoding="utf-8") as fh:
+            result = yaml.safe_load(fh)
+        return result if isinstance(result, dict) else {}
+    except ImportError:
+        pass
+    # Minimal fallback ── only handles the flat subset used by our config.
+    result: dict[str, Any] = {}
+    current_section: dict[str, Any] | None = None
+    current_key = ""
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            # skip comments / blank lines
+            if current_section is not None and not raw.startswith((" ", "\t", "#")):
+                current_section = None
+            continue
+        if stripped.endswith(":"):
+            current_key = stripped[:-1].strip()
+            current_section = {}
+            result[current_key] = current_section
+            continue
+        if current_section is not None and ":" in stripped:
+            k, _, v = stripped.partition(":")
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            current_section[k] = v
+    return result

@@ -65,6 +65,32 @@ not in this working plan.
 - Do not modify OpenClaw core.
 - Do not modify `C:\Users\29068\Desktop\agent-test-bench`.
 
+## SWE-Rebench Integration (swe_rebench/)
+
+The `swe_rebench/` package is an **independent** batch runner that runs
+swe-rebench tasks inside Docker containers with full OpenClaw + sidecar
+trace collection.
+
+- **Isolation**: Does not modify `packages/openclaw-plugin/`, `services/scheduler/`,
+  or OpenClaw core.  All code lives under `swe_rebench/`.
+- **Bundle**: `python -m swe_rebench.runner prepare` assembles a runtime bundle
+  that gets volume-mounted into each container at `/claw`.
+- **Per-task traces**: Each task writes `trace.jsonl` to a dedicated directory
+  under `swe_rebench/traces/<task_id>/`.
+- **Flat export**: `--export` copies all traces to `swe_rebench/export/` keyed
+  by task ID.
+- **Sub-commands**: `prepare`, `run`, `collect`, `cleanup`.
+- **Task sources**: swe-bench JSON/JSONL datasets, simple JSON lists, or
+  single-task CLI (`--image` + `--task-id` + `--problem`).
+- **Config**: `swe_rebench/config.example.yaml` (copy and edit as `config.yaml`).
+
+Files:
+- `swe_rebench/runner.py` — main CLI orchestrator
+- `swe_rebench/prepare.py` — bundle assembler (+ container entrypoint/setup generator)
+- `swe_rebench/docker.py` — Docker SDK wrapper with CLI fallback
+- `swe_rebench/task_source.py` — multi-format task loader
+- `swe_rebench/config.py` — YAML config with env-var substitution
+
 ## Validation Commands
 
 Run after code changes:

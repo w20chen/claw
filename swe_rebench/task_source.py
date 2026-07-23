@@ -1,0 +1,221 @@
+"""
+Task definition loading for swe-rebench.
+
+Supports multiple formats:
+- Native swe-rebench JSON/JSONL dataset files
+- Simple JSON list
+- Manual inline task specification
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+
+@dataclass
+class TaskDef:
+    """A single swe-rebench task definition."""
+
+    instance_id: str
+    """Unique task identifier (e.g. ``django__django-12345``)."""
+
+    image: str
+    """Docker image name (e.g. ``swerebench/sweb.eval.x86_64.django:latest``)."""
+
+    problem_statement: str = ""
+    """The GitHub issue / problem description for the agent to solve."""
+
+    repo: str = ""
+    """Repository slug (e.g. ``django/django``)."""
+
+    base_commit: str = ""
+    """Base commit hash the image is checked out at."""
+
+    hint_text: str = ""
+    """Optional hint / additional instructions."""
+
+    extra_env: dict[str, str] = field(default_factory=dict)
+    """Additional environment variables to pass to the container."""
+
+
+def load_tasks_from_swebench_dataset(path: str | Path) -> list[TaskDef]:
+    """Load tasks from a standard SWE-bench / SWE-rebench dataset file.
+
+    The dataset is typically a JSON or JSONL file.  JSON files may contain
+    a top-level array or a dict with an ``instances`` or ``data`` key.
+    """
+    path = Path(path)
+    raw_text = path.read_text(encoding="utf-8")
+
+    stripped = raw_text.strip()
+
+    # Try single JSON parse first (handles array-of-objects and single-object)
+    try:
+        data = json.loads(stripped)
+        if isinstance(data, list):
+            return [_record_to_task(r) for r in data if isinstance(r, dict)]
+        if isinstance(data, dict):
+            # Might be a task record itself, or a wrapper with "instances"/"data"/"tasks"
+            items = data.get("instances") or data.get("data") or data.get("tasks")
+            if isinstance(items, list):
+                return [_record_to_task(r) for r in items if isinstance(r, dict)]
+            # Single task record
+            if data.get("instance_id") or data.get("task_id") or data.get("docker_image"):
+                return [_record_to_task(data)]
+            raise ValueError(f"Cannot find tasks in JSON dict with keys: {list(data.keys())}")
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # JSONL: one JSON object per line
+    if stripped.startswith("{"):
+        records = _try_jsonl(raw_text)
+        if records is not None:
+            return [_record_to_task(r) for r in records]
+
+    # Plain list fallback (one JSON value per line, may be objects or arrays)
+    tasks: list[TaskDef] = []
+    for line in raw_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            parsed = json.loads(line)
+            if isinstance(parsed, list):
+                for item in parsed:
+                    if isinstance(item, dict):
+                        tasks.append(_record_to_task(item))
+            elif isinstance(parsed, dict):
+                tasks.append(_record_to_task(parsed))
+        except json.JSONDecodeError:
+            continue
+    return tasks
+
+
+def load_tasks_from_simple_list(path: str | Path) -> list[TaskDef]:
+    """Load tasks from a simple JSON file.
+
+    Expected format::
+
+        [
+          {
+            "instance_id": "task-1",
+            "image": "swerebench/...:latest",
+            "problem_statement": "..."
+          }
+        ]
+    """
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        raise ValueError(f"Expected a JSON array, got {type(data)}")
+    return [_record_to_task(item) for item in data]
+
+
+def create_single_task(
+    instance_id: str,
+    image: str,
+    problem_statement: str = "",
+    **kwargs: Any,
+) -> TaskDef:
+    """Create a single task definition inline."""
+    return TaskDef(
+        instance_id=instance_id,
+        image=image,
+        problem_statement=problem_statement,
+        **kwargs,
+    )
+
+
+def _try_jsonl(text: str) -> list[dict[str, Any]] | None:
+    """Try parsing as JSONL (one JSON object per line).  Returns None if not all lines are JSON."""
+    records: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+            if isinstance(rec, dict):
+                records.append(rec)
+            else:
+                return None
+        except json.JSONDecodeError:
+            return None
+    return records if records else None
+
+
+def _record_to_task(record: dict[str, Any]) -> TaskDef:
+    """Map a raw swe-bench record dict to a ``TaskDef``."""
+
+    # instance_id ── many possible key names
+    iid = (
+        record.get("instance_id")
+        or record.get("task_id")
+        or record.get("id")
+        or record.get("name")
+        or "unknown"
+    )
+
+    # image
+    image = (
+        record.get("docker_image")
+        or record.get("image")
+        or record.get("container_image")
+        or ""
+    )
+    # swe-rebench sometimes has "image_name" + "image_tag"
+    if not image:
+        name = record.get("image_name", "")
+        tag = record.get("image_tag", "latest")
+        if name:
+            image = f"{name}:{tag}"
+
+    # problem statement
+    problem = (
+        record.get("problem_statement")
+        or record.get("issue_text")
+        or record.get("problem")
+        or record.get("description")
+        or record.get("text")
+        or ""
+    )
+    # swe-bench often has problem_statement under a nested key
+    if not problem and isinstance(record.get("task"), dict):
+        problem = record["task"].get("problem_statement", "")
+    if not problem and isinstance(record.get("issue"), dict):
+        problem = record["issue"].get("body", "")
+
+    # repo
+    repo = record.get("repo") or record.get("repository") or ""
+
+    # base commit
+    base = (
+        record.get("base_commit")
+        or record.get("base_sha")
+        or record.get("commit")
+        or ""
+    )
+
+    # hint
+    hint = record.get("hint_text") or record.get("hints_text") or record.get("hint") or ""
+
+    # extra env
+    extra: dict[str, str] = {}
+    for key, val in record.items():
+        if key.startswith("env_") and isinstance(val, str):
+            extra[key[4:]] = val
+    if isinstance(record.get("environment"), dict):
+        for k, v in record["environment"].items():
+            extra[str(k)] = str(v)
+
+    return TaskDef(
+        instance_id=str(iid),
+        image=str(image),
+        problem_statement=str(problem),
+        repo=str(repo),
+        base_commit=str(base),
+        hint_text=str(hint),
+        extra_env=extra,
+    )
