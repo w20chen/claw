@@ -126,7 +126,7 @@ export default definePluginEntry({
           max_string_bytes: {type: "integer", default: 16384},
           max_messages_bytes: {type: "integer", default: 131072},
           max_tool_output_bytes: {type: "integer", default: 65536},
-          trace_dir: {type: "string", default: ""},
+          trace_dir: {type: "string", default: "traces/"},
         },
       },
     }

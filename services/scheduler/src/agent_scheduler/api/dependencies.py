@@ -25,7 +25,7 @@ class AppState:
     executions: ExecutionRegistry
     metrics: Metrics
     topology: dict
-    trace_writer: AgentTestBenchTraceWriter | None
+    trace_writer: AgentTestBenchTraceWriter
 
 
 def build_state(config: SchedulerConfig | None = None) -> AppState:
@@ -49,5 +49,5 @@ def build_state(config: SchedulerConfig | None = None) -> AppState:
         executions=ExecutionRegistry(),
         metrics=Metrics(),
         topology=read_topology(),
-        trace_writer=AgentTestBenchTraceWriter(cfg.trace_dir) if cfg.trace_dir else None,
+        trace_writer=AgentTestBenchTraceWriter(cfg.trace_dir),
     )

@@ -266,5 +266,5 @@ export const DEFAULT_TRACE_CONFIG: TraceConfig = {
   max_string_bytes: 16384,
   max_messages_bytes: 131072,
   max_tool_output_bytes: 65536,
-  trace_dir: "",
+  trace_dir: "traces/",
 };

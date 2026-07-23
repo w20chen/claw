@@ -17,7 +17,7 @@ class SchedulerConfig:
     admission_wait_ms: int = 5_000
     tool_profiles_path: Path | None = None
     auth_token: str | None = None
-    trace_dir: Path | None = None
+    trace_dir: Path = Path("traces")
     resource_poll_interval_ms: int = 50
     resource_timeline_max_points: int = 2_000
     llm_proxy_enabled: bool = True
@@ -36,7 +36,7 @@ class SchedulerConfig:
             admission_wait_ms=int(os.getenv("AGENT_SCHEDULER_ADMISSION_WAIT_MS", "5000")),
             tool_profiles_path=_resolve_path(profile, env_base) if profile else None,
             auth_token=os.getenv("AGENT_SCHEDULER_TOKEN"),
-            trace_dir=_resolve_path(trace, env_base) if trace else None,
+            trace_dir=_resolve_path(trace, env_base) if trace else Path("traces"),
             resource_poll_interval_ms=int(os.getenv("AGENT_SCHEDULER_RESOURCE_POLL_INTERVAL_MS", "50")),
             resource_timeline_max_points=int(os.getenv("AGENT_SCHEDULER_RESOURCE_TIMELINE_MAX_POINTS", "2000")),
             llm_proxy_enabled=os.getenv("AGENT_SCHEDULER_LLM_PROXY_ENABLED", "true").lower()
