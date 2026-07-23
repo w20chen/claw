@@ -14,6 +14,35 @@ OpenClaw agent task
 The project must remain an OpenClaw plugin plus sidecar. It does not modify
 OpenClaw core.
 
+## Prerequisites
+
+| Component | Requirement | Check |
+|-----------|------------|-------|
+| Python | >= 3.10 | `python3 --version` |
+| Node.js | >= 24 (LTS) | `node --version` |
+| npm | bundled with Node.js | `npm --version` |
+| OpenClaw CLI | >= 2026.7.1 | `npm install -g openclaw@2026.7.1` |
+| Docker | only for swe_rebench | `docker --version` |
+
+Python packages (installed automatically by `pip install`):
+`fastapi`, `httpx`, `pydantic`, `psutil`, `uvicorn`, `prometheus-client`.
+Dev extras: `pytest`, `ruff`, `mypy`, `jsonschema`.
+
+Node.js packages (dev only, not needed at runtime): `typescript`, `@types/node`.
+
+### Quick Install
+
+```bash
+# Python sidecar
+python3 -m pip install -e 'services/scheduler[dev]'
+
+# TypeScript plugin
+cd packages/openclaw-plugin && npm install && npm run build && cd ../..
+
+# OpenClaw CLI (if not already installed)
+npm install -g openclaw@2026.7.1
+```
+
 ## What You Should Expect
 
 For a real OpenClaw run, the sidecar writes `trace.jsonl` records like:
@@ -58,6 +87,8 @@ installed into the Python environment used by this shell. Rerun:
 
 ```bash
 python3 -m pip install -e 'services/scheduler[dev]'
+# or, if editable install is unsupported:
+python3 -m pip install 'services/scheduler[dev]'
 ```
 
 ## 2. Link The Plugin Into OpenClaw
@@ -165,19 +196,29 @@ cd ~/claw/services/scheduler
 python3 -m agent_scheduler.main --host 127.0.0.1 --port 8765
 ```
 
-The sidecar loads `.env` automatically from the repository root. The default
-`.env.example` writes to `data/openclaw-trace.sqlite3` and `data/trace.jsonl`.
-DeepSeek is the built-in upstream default. For the most explicit proxy setup,
-put the DeepSeek key in `.env` so the sidecar always sends the correct upstream
-authorization:
+The sidecar loads `.env` automatically from the repository root.  Copy the
+example and edit as needed:
 
 ```bash
-AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL=https://api.deepseek.com
-AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY=<your-deepseek-api-key>
+cp .env.example .env
+# Edit .env to set AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY if your provider
+# requires a different key than what OpenClaw sends.
 ```
 
-DeepSeek's built-in default is `https://api.deepseek.com`. Do not add `/v1`
-unless your chosen upstream actually expects it.
+The sidecar **automatically normalises** `/v1/models` responses so OpenClaw
+provider discovery always passes — no extra config needed.  DeepSeek is
+the built-in upstream default (`https://api.deepseek.com`).  Key env vars:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL` | `https://api.deepseek.com` | Where to forward LLM requests |
+| `AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY` | *(none)* | Override the Authorization header |
+| `AGENT_SCHEDULER_LLM_PROXY_EXPOSE_MODEL` | *(none)* | Model ID exposed by `/v1/models` (set to bypass upstream) |
+| `AGENT_SCHEDULER_LLM_PROXY_UPSTREAM_MODEL` | *(none)* | Real upstream model name for translation |
+| `AGENT_SCHEDULER_TRACE_DIR` | `traces` | Directory for `trace.jsonl` output |
+
+For OpenRouter or other providers with `provider/model` naming, set both
+`EXPOSE_MODEL` and `UPSTREAM_MODEL` to translate model names transparently.
 
 Check health from another shell:
 
@@ -192,12 +233,13 @@ provider discovery always passes:
 
 ```bash
 export DEEPSEEK_API_KEY='<your-deepseek-api-key>'
-openclaw onboard --non-interactive \
+openclaw onboard --non-interactive --accept-risk \
   --mode local \
   --auth-choice vllm \
   --custom-base-url 'http://127.0.0.1:8765/v1' \
   --custom-api-key "$DEEPSEEK_API_KEY" \
   --custom-model-id 'deepseek-v4-flash'
+# Add --skip-health if you only use 'openclaw agent --local' (no gateway).
 ```
 
 The sidecar exposes `/v1/models` (auto-normalised) and `/v1/chat/completions`,

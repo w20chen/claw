@@ -35,41 +35,111 @@ Copy and edit the example config:
 cp swe_rebench/config.example.yaml swe_rebench/config.yaml
 ```
 
-Minimal config (`swe_rebench/config.yaml`):
+### Required: LLM Provider
+
+You **must** set `llm.api_key`.  Everything else has sensible defaults.
+
+**DeepSeek (default):**
 
 ```yaml
 llm:
-  api_key: "${LLM_API_KEY}"          # or set LLM_API_KEY in env
+  api_key: "sk-xxxxxxxx"                # REQUIRED — your DeepSeek API key
   upstream_base_url: "https://api.deepseek.com"
   model: "deepseek-v4-flash"
   openclaw_model_ref: "vllm/deepseek-v4-flash"
-
-docker:
-  host: "unix:///var/run/docker.sock"
-  memory_limit: "8g"
-  cpus: 4
-
-batch:
-  parallelism: 4
-  task_timeout_seconds: 1800
-
-output:
-  trace_root: "./swe_rebench/traces"
-  flat_export_dir: "./swe_rebench/export"
 ```
 
-### OpenRouter
+**OpenRouter:**
 
 ```yaml
 llm:
-  api_key: "sk-or-v1-xxxxxxxx"
+  api_key: "sk-or-v1-xxxxxxxx"          # REQUIRED — your OpenRouter API key
   upstream_base_url: "https://openrouter.ai/api/v1"
-  model: "deepseek/deepseek-chat"           # OpenRouter model ID
-  openclaw_model_ref: "vllm/deepseek-chat"  # clean name for OpenClaw
+  model: "deepseek/deepseek-chat"        # OpenRouter model ID (with slash)
+  openclaw_model_ref: "vllm/deepseek-chat"  # clean name for OpenClaw (no slash)
+```
+
+**Custom OpenAI-compatible endpoint:**
+
+```yaml
+llm:
+  api_key: "your-key"
+  upstream_base_url: "https://your-api.example.com/v1"
+  model: "your-model-name"
+  openclaw_model_ref: "vllm/your-model-name"
 ```
 
 The sidecar automatically normalises `/v1/models` responses and translates
-model names so OpenClaw never sees the `provider/model` slash format.
+model names.  When `model` contains a `/` (like OpenRouter), the entrypoint
+sets `AGENT_SCHEDULER_LLM_PROXY_UPSTREAM_MODEL` for automatic translation.
+
+### Configuration Reference
+
+Every section and field.  Values shown are defaults.
+
+#### `llm`
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `api_key` | **yes** | — | Upstream provider API key. Supports `${LLM_API_KEY}` env-var expansion. |
+| `upstream_base_url` | no | `https://api.deepseek.com` | OpenAI-compatible base URL the sidecar proxies to. |
+| `model` | no | `deepseek-v4-flash` | Model ID as known to the upstream provider. |
+| `openclaw_model_ref` | no | `vllm/deepseek-v4-flash` | How OpenClaw refers to the model. Format: `vllm/<name>`. |
+
+#### `docker`
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `host` | no | `unix:///var/run/docker.sock` | Docker daemon socket. Falls back to `docker` CLI if SDK unavailable. |
+| `memory_limit` | no | `8g` | Per-container memory limit. |
+| `cpus` | no | `4` | Per-container CPU limit. |
+| `network_mode` | no | `bridge` | Docker network mode. Use `host` if containers need host network access. |
+| `dns_servers` | no | `[]` | Extra DNS servers. |
+| `pull_policy` | no | `missing` | Image pull policy: `always`, `missing`, or `never`. |
+| `cap_add` | no | `[]` | Extra Linux capabilities (e.g. `["SYS_PTRACE"]`). |
+
+#### `batch`
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `parallelism` | no | `4` | Max concurrent containers. |
+| `task_timeout_seconds` | no | `1800` | Per-task wall-clock timeout. `0` = no timeout. |
+| `retry_failed` | no | `0` | Retry count for failed tasks. |
+| `continue_on_error` | no | `true` | Keep running remaining tasks after a failure. |
+
+#### `output`
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `trace_root` | no | `./swe_rebench/traces` | Directory for per-task trace output. |
+| `report_path` | no | `./swe_rebench/report.json` | Batch summary report path. |
+| `flat_export_dir` | no | `./swe_rebench/export` | Flat export directory (set to `""` to disable). |
+
+#### `bundle`
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `plugin_source` | no | `packages/openclaw-plugin` | Path to plugin source (copied into bundle). |
+| `scheduler_source` | no | `services/scheduler` | Path to sidecar source (copied into bundle). |
+| `tool_profiles` | no | `examples/tool-profiles.example.json` | Tool profile JSON for the sidecar. |
+| `output_dir` | no | `swe_rebench/bundle` | Where the runtime bundle is assembled. |
+
+#### `agent`
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `max_turns` | no | `50` | Max tool-call turns before the agent is stopped. |
+| `extra_args` | no | `[]` | Extra CLI args passed to `openclaw agent`. |
+
+### Environment Variables
+
+The config file supports `${VAR}` expansion.  You can also set the key
+directly in the environment instead of in the file:
+
+```bash
+export LLM_API_KEY="sk-xxxxxxxx"
+# Then use  api_key: "${LLM_API_KEY}"  in config.yaml
+```
 
 ## Discovering Tasks
 

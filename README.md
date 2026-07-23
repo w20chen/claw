@@ -87,12 +87,13 @@ sidecar as the custom base URL:
 
 ```bash
 export DEEPSEEK_API_KEY='<your-deepseek-api-key>'
-openclaw onboard --non-interactive \
+openclaw onboard --non-interactive --accept-risk \
   --mode local \
   --auth-choice vllm \
   --custom-base-url 'http://127.0.0.1:8765/v1' \
   --custom-api-key "$DEEPSEEK_API_KEY" \
   --custom-model-id 'deepseek-v4-flash'
+# Add --skip-health if you only use 'openclaw agent --local' (no gateway).
 ```
 
 The sidecar **automatically normalises** `/v1/models` responses so OpenClaw
@@ -203,10 +204,14 @@ The `swe_rebench/` package runs swe-rebench benchmark tasks inside Docker
 containers with full OpenClaw + sidecar trace collection. Each task produces an
 independent `trace.jsonl`.
 
+**The only required config is an LLM API key.**  See
+[swe_rebench/README.md](swe_rebench/README.md) for the full configuration
+reference including DeepSeek, OpenRouter, and custom provider setup.
+
 ```bash
-# 1. Configure
+# 1. Configure (only llm.api_key is required)
 cp swe_rebench/config.example.yaml swe_rebench/config.yaml
-# Edit: set llm.api_key and model
+# Edit: set llm.api_key (supports ${LLM_API_KEY} env-var expansion)
 
 # 2. Prepare bundle (one-time)
 python -m swe_rebench.runner prepare --config swe_rebench/config.yaml

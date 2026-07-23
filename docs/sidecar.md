@@ -34,12 +34,13 @@ at the sidecar:
 
 ```bash
 export DEEPSEEK_API_KEY='<your-deepseek-api-key>'
-openclaw onboard --non-interactive \
+openclaw onboard --non-interactive --accept-risk \
   --mode local \
   --auth-choice vllm \
   --custom-base-url 'http://127.0.0.1:8765/v1' \
   --custom-api-key "$DEEPSEEK_API_KEY" \
   --custom-model-id 'deepseek-v4-flash'
+# Add --skip-health if you only use 'openclaw agent --local' (no gateway).
 ```
 
 Use the model as `vllm/deepseek-v4-flash`.

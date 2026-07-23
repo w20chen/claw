@@ -94,7 +94,7 @@ not the native `deepseek` provider.  The sidecar then forwards to DeepSeek
 
 ```bash
 export DEEPSEEK_API_KEY='<your-deepseek-api-key>'
-openclaw onboard --non-interactive \
+openclaw onboard --non-interactive --accept-risk \
   --mode local --auth-choice vllm \
   --custom-base-url 'http://127.0.0.1:8765/v1' \
   --custom-api-key "$DEEPSEEK_API_KEY" \
@@ -117,7 +117,7 @@ vLLM server via `AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL`.
 
 ```bash
 export VLLM_API_KEY='vllm-local'
-openclaw onboard --non-interactive \
+openclaw onboard --non-interactive --accept-risk \
   --mode local \
   --auth-choice vllm \
   --custom-base-url 'http://127.0.0.1:8000/v1' \
