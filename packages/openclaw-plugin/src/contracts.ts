@@ -2,6 +2,19 @@ export type Mode = "observe" | "enforce";
 export type ExecutionBackend = "hook-only" | "marker" | "managed-wrapper";
 export type ProfilingMode = "off" | "proc" | "perf" | "ksys" | "vtune";
 
+export type TracePluginConfig = {
+  schema_version: number;
+  include_raw_events: boolean;
+  include_llm_messages: boolean;
+  include_tool_outputs: boolean;
+  redact_sensitive_data: boolean;
+  flush_span_start: boolean;
+  max_string_bytes: number;
+  max_messages_bytes: number;
+  max_tool_output_bytes: number;
+  trace_file_path: string;
+};
+
 export type PluginConfig = {
   endpoint: string;
   mode: Mode;
@@ -22,6 +35,7 @@ export type PluginConfig = {
   enableNuma: boolean;
   profilingMode: ProfilingMode;
   securityBoundaryAccepted: boolean;
+  trace: TracePluginConfig;
 };
 
 export type CommonEvent = {

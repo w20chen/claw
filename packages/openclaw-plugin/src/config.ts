@@ -19,7 +19,19 @@ const defaults: PluginConfig = {
   enableAffinity: true,
   enableNuma: true,
   profilingMode: "off",
-  securityBoundaryAccepted: false
+  securityBoundaryAccepted: false,
+  trace: {
+    schema_version: 6,
+    include_raw_events: false,
+    include_llm_messages: true,
+    include_tool_outputs: true,
+    redact_sensitive_data: true,
+    flush_span_start: true,
+    max_string_bytes: 16384,
+    max_messages_bytes: 131072,
+    max_tool_output_bytes: 65536,
+    trace_file_path: "",
+  },
 };
 
 export function loadConfig(input: unknown): PluginConfig {

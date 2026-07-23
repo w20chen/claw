@@ -21,6 +21,17 @@ type ToolRegistrationFunction = (payload: {
   backend: "marker" | "managed-wrapper";
 }) => Promise<{one_time_token: string}>;
 
+export type InstrumentResult = {
+  params: Record<string, unknown> | null;
+  executionId: string | null;
+  /** Original command the agent requested. */
+  requestedCommand: string | null;
+  /** Command that OpenClaw will actually run. */
+  effectiveCommand: string | null;
+  /** Command the launcher will execute as payload. */
+  payloadCommand: string | null;
+};
+
 export async function instrumentExecParams(
   event: unknown,
   context: unknown,
@@ -28,15 +39,23 @@ export async function instrumentExecParams(
   decision: ToolDecision,
   client: ExecutionRegistrar,
   config: PluginConfig
-): Promise<{params: Record<string, unknown> | null; executionId: string | null}> {
-  if (config.executionBackend === "hook-only") return {params: null, executionId: null};
-  if (!shouldInstrument(event, config)) return {params: null, executionId: null};
+): Promise<InstrumentResult> {
+  const empty: InstrumentResult = {
+    params: null,
+    executionId: null,
+    requestedCommand: null,
+    effectiveCommand: null,
+    payloadCommand: null,
+  };
+
+  if (config.executionBackend === "hook-only") return empty;
+  if (!shouldInstrument(event, config)) return empty;
   const params = cloneRecord(isRecord(event) ? event.params ?? event.arguments ?? event.input ?? null : null);
   if (params === null || typeof params.command !== "string" || params.command.length === 0) {
-    return {params: null, executionId: null};
+    return empty;
   }
-  const command = params.command;
-  const commandDigest = stableDigest(command);
+  const requestedCommand = params.command;
+  const commandDigest = stableDigest(requestedCommand);
   const executionId = extractString(event, ["tool_call_id", "toolCallId", "id"]) ?? `exec-${randomUUID()}`;
   const runId = payload.run_id ?? extractString(context, ["runId", "run_id"]);
   const sessionKeyHash = payload.session_key === null ? null : stableDigest(payload.session_key);
@@ -49,7 +68,7 @@ export async function instrumentExecParams(
       run_id: runId,
       session_key_hash: sessionKeyHash,
       command_digest: commandDigest,
-      command,
+      command: requestedCommand,
       workdir: typeof params.workdir === "string" ? params.workdir : null,
       host: typeof params.host === "string" ? params.host : "gateway",
       placement: decision.placement ?? decision.placement_advice ?? null,
@@ -76,20 +95,35 @@ export async function instrumentExecParams(
     CLAW_COMMAND_DIGEST: commandDigest
   };
 
+  let effectiveCommand: string | null = params.command as string;
+  let payloadCommand: string | null = params.command as string;
+
   if (config.executionBackend === "managed-wrapper") {
     if (token === null) {
-      if (config.mode === "observe" || config.failOpen) return {params: null, executionId: null};
+      if (config.mode === "observe" || config.failOpen) return empty;
       throw new Error("execution_registration_failed");
     }
-    params.command = [
+    effectiveCommand = [
       shellQuote(config.launcherPath),
       "run",
       `--execution-id=${shellQuote(executionId)}`,
       `--token=${shellQuote(token)}`
     ].join(" ");
+    params.command = effectiveCommand;
+    // payloadCommand stays as the original requestedCommand
+  } else if (config.executionBackend === "marker") {
+    // For marker backend, effective == payload == requested (command unchanged)
+    effectiveCommand = requestedCommand;
+    payloadCommand = requestedCommand;
   }
 
-  return {params, executionId};
+  return {
+    params,
+    executionId,
+    requestedCommand,
+    effectiveCommand,
+    payloadCommand,
+  };
 }
 
 export function buildTrustedResourceScope(event: unknown, context: unknown): ResourceScope | null {

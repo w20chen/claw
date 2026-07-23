@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from uuid import uuid4
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,13 +13,27 @@ from agent_scheduler.monitoring.tool_runtime import ToolRuntimeSample
 
 
 class AgentTestBenchTraceWriter:
-    def __init__(self, path: Path, *, scaffold: str = "openclaw") -> None:
+    """Trace writer supporting both v5 (legacy) and v6 (span-based) formats.
+
+    Set schema_version=6 to write span_start/span_end pairs.
+    Set schema_version=5 for backward-compatible single-line actions.
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        scaffold: str = "openclaw",
+        schema_version: int = 5,
+    ) -> None:
         self.path = path
         self.scaffold = scaffold
+        self.schema_version = schema_version
         self._lock = threading.Lock()
         self._model_starts: dict[str, ModelEvent] = {}
         self._tool_starts: dict[str, ToolBeforeRequest] = {}
         self._recent_proxy_calls: list[dict[str, Any]] = []
+        self._seq_counter = 0
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not self.path.exists() or self.path.stat().st_size == 0:
             self._append(self._metadata_record())
@@ -30,6 +45,21 @@ class AgentTestBenchTraceWriter:
         start = self._pop_tool_start(event)
         tool_args = None if start is None else start.raw_params
         ts_start, ts_end = _tool_timestamps(sample, event.duration_ms)
+
+        if self.schema_version >= 6:
+            self._record_tool_v6(event, sample, start, tool_args, ts_start, ts_end)
+        else:
+            self._record_tool_v5(event, sample, start, tool_args, ts_start, ts_end)
+
+    def _record_tool_v5(
+        self,
+        event: ToolCompletedEvent,
+        sample: ToolRuntimeSample,
+        start: ToolBeforeRequest | None,
+        tool_args: Any,
+        ts_start: float,
+        ts_end: float,
+    ) -> None:
         self._append(
             {
                 "type": "action",
@@ -55,6 +85,110 @@ class AgentTestBenchTraceWriter:
             }
         )
 
+    def _record_tool_v6(
+        self,
+        event: ToolCompletedEvent,
+        sample: ToolRuntimeSample,
+        start: ToolBeforeRequest | None,
+        tool_args: Any,
+        ts_start: float,
+        ts_end: float,
+    ) -> None:
+        trace_id = event.run_id or "unknown-run"
+        span_id = event.tool_call_id or event.event_id
+        parent_span_id = None  # Python sidecar doesn't track LLM span lineage
+        run_id = event.run_id
+        session_id = event.session_id
+        agent_id = event.agent_id or _agent_id_from_session_key(event.session_key)
+
+        self._seq_counter += 1
+        seq_no = self._seq_counter
+
+        wall_start_ns = str(int(ts_start * 1_000_000_000))
+        wall_end_ns = str(int(ts_end * 1_000_000_000))
+        # Monotonic not available in Python sidecar trace; use wall as fallback
+        mono_start_ns = wall_start_ns
+        mono_end_ns = wall_end_ns
+        duration_ns = str(int(max(0, event.duration_ms) * 1_000_000))
+
+        status_code = "ok" if event.succeeded else ("error" if event.error_type else "unknown")
+
+        scope = start.resource_scope if start is not None else None
+        has_pid = scope is not None and scope.pid is not None
+
+        # span_start (written retroactively, so time_quality is "derived")
+        self._append({
+            "schema_version": 6,
+            "record_type": "span_start",
+            "trace_id": trace_id,
+            "span_id": span_id,
+            "parent_span_id": parent_span_id,
+            "session_id": session_id,
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "sequence_no": seq_no,
+            "kind": "tool",
+            "name": event.tool_name,
+            "wall_time_ns": wall_start_ns,
+            "monotonic_time_ns": mono_start_ns,
+            "input": {
+                "requested_args": tool_args,
+            },
+            "execution": {
+                "mode": "launcher" if event.execution_id else "in_process_or_runtime_managed",
+                "execution_id": event.execution_id,
+            },
+        })
+
+        # span_end
+        self._append({
+            "schema_version": 6,
+            "record_type": "span_end",
+            "trace_id": trace_id,
+            "span_id": span_id,
+            "parent_span_id": parent_span_id,
+            "session_id": session_id,
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "sequence_no": seq_no,
+            "kind": "tool",
+            "name": event.tool_name,
+            "wall_time_ns": wall_end_ns,
+            "monotonic_time_ns": mono_end_ns,
+            "duration_ns": duration_ns,
+            "status": {
+                "code": status_code,
+                "message": event.error_type,
+            },
+            "output": {
+                "exit_code": 0 if event.succeeded else None,
+                "result": event.raw_result,
+            },
+            "execution": {
+                "mode": "launcher" if event.execution_id else "in_process_or_runtime_managed",
+                "execution_id": event.execution_id,
+                "payload_pid": scope.pid if scope is not None else None,
+                "payload_pid_start_time_ticks": scope.root_starttime_ticks if scope is not None else None,
+                "cgroup_path": scope.cgroup_path if scope is not None else None,
+                "pid_role": "payload_root" if has_pid else None,
+            },
+            "resources": {
+                "attribution_status": _v6_attribution(sample),
+                "scope": "cgroup" if (scope is not None and scope.cgroup_path) else ("process_tree" if has_pid else "none"),
+                "quality": "unknown" if sample.sampling_quality == "unknown" else "partial",
+                "monitor_start_wall_time_ns": None,
+                "monitor_end_wall_time_ns": None,
+                "monitor_start_monotonic_ns": None,
+                "monitor_end_monotonic_ns": None,
+                "coverage_duration_ns": None,
+                "action_duration_ns": duration_ns,
+                "coverage_ratio": None,
+                "coverage_reason": "full_window" if has_pid else "pid_unavailable",
+                "cpu_time_s": sample.cpu_time_delta_s,
+                "rss_peak_bytes": sample.rss_bytes_peak,
+            },
+        })
+
     def record_model(self, event: ModelEvent) -> None:
         key = event.call_id or event.event_id
         if event.event_type == "model_call_started":
@@ -66,6 +200,20 @@ class AgentTestBenchTraceWriter:
         duration_s = (event.duration_ms or 0) / 1000
         ts_start = _parse_timestamp(start.occurred_at) if start is not None else ts_end - duration_s
         proxy_data = proxy_call.get("data", {}) if isinstance(proxy_call, dict) else {}
+
+        if self.schema_version >= 6:
+            self._record_model_v6(event, start, ts_start, ts_end, proxy_data)
+        else:
+            self._record_model_v5(event, start, ts_start, ts_end, proxy_data)
+
+    def _record_model_v5(
+        self,
+        event: ModelEvent,
+        start: ModelEvent | None,
+        ts_start: float,
+        ts_end: float,
+        proxy_data: dict[str, Any],
+    ) -> None:
         self._append(
             {
                 "type": "action",
@@ -99,6 +247,100 @@ class AgentTestBenchTraceWriter:
                 },
             }
         )
+
+    def _record_model_v6(
+        self,
+        event: ModelEvent,
+        start: ModelEvent | None,
+        ts_start: float,
+        ts_end: float,
+        proxy_data: dict[str, Any],
+    ) -> None:
+        trace_id = event.run_id or "unknown-run"
+        span_id = event.call_id or event.event_id
+        run_id = event.run_id
+        session_id = event.session_id
+        agent_id = event.agent_id or _agent_id_from_session_key(event.session_key)
+
+        self._seq_counter += 1
+        seq_no = self._seq_counter
+
+        wall_start_ns = str(int(ts_start * 1_000_000_000))
+        wall_end_ns = str(int(ts_end * 1_000_000_000))
+        duration_ns = str(int(max(0, event.duration_ms or 0) * 1_000_000))
+
+        status_code = "ok" if event.outcome in ("completed", "ok", "success") else ("error" if event.outcome == "error" else "unknown")
+
+        # Don't duplicate messages_in (v6 stores in input.messages only)
+        messages = _first_present(
+            None if start is None else start.raw_input,
+            proxy_data.get("messages_in"),
+        )
+
+        self._append({
+            "schema_version": 6,
+            "record_type": "span_start",
+            "trace_id": trace_id,
+            "span_id": span_id,
+            "parent_span_id": None,
+            "session_id": session_id,
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "sequence_no": seq_no,
+            "kind": "llm",
+            "name": event.model or "unknown-model",
+            "wall_time_ns": wall_start_ns,
+            "monotonic_time_ns": wall_start_ns,
+            "input": {
+                "requested_args": None,
+                "messages": messages,
+            },
+            "execution": {
+                "mode": None,
+                "execution_id": None,
+            },
+        })
+
+        self._append({
+            "schema_version": 6,
+            "record_type": "span_end",
+            "trace_id": trace_id,
+            "span_id": span_id,
+            "parent_span_id": None,
+            "session_id": session_id,
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "sequence_no": seq_no,
+            "kind": "llm",
+            "name": event.model or "unknown-model",
+            "wall_time_ns": wall_end_ns,
+            "monotonic_time_ns": wall_end_ns,
+            "duration_ns": duration_ns,
+            "status": {
+                "code": status_code,
+                "message": None,
+            },
+            "output": {
+                "content": event.raw_output,
+            },
+            "execution": {
+                "mode": None,
+                "execution_id": None,
+            },
+            "resources": {
+                "attribution_status": "not_applicable",
+                "scope": "none",
+                "quality": "unknown",
+                "monitor_start_wall_time_ns": None,
+                "monitor_end_wall_time_ns": None,
+                "monitor_start_monotonic_ns": None,
+                "monitor_end_monotonic_ns": None,
+                "coverage_duration_ns": None,
+                "action_duration_ns": duration_ns,
+                "coverage_ratio": None,
+                "coverage_reason": "pid_unavailable",
+            },
+        })
 
     def record_llm_proxy_call(
         self,
@@ -163,6 +405,15 @@ class AgentTestBenchTraceWriter:
                 fh.write(line + "\n")
 
     def _metadata_record(self) -> dict[str, Any]:
+        if self.schema_version >= 6:
+            return {
+                "schema_version": 6,
+                "record_type": "trace_metadata",
+                "trace_format_version": 6,
+                "scaffold": self.scaffold,
+                "mode": "collect",
+                "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            }
         return {
             "type": "trace_metadata",
             "trace_format_version": 5,
@@ -279,3 +530,14 @@ def _resource_usage(sample: ToolRuntimeSample) -> dict[str, Any]:
         "timeline_truncated": sample.resource_timeline_truncated,
         "timeline": sample.resource_timeline,
     }
+
+
+def _v6_attribution(sample: ToolRuntimeSample) -> str:
+    """Map legacy attribution_status to v6 AttributionStatus."""
+    mapping = {
+        "pid": "attributed",
+        "cgroup-v2": "attributed",
+        "unattributed": "unattributed",
+        "pid-unavailable": "failed",
+    }
+    return mapping.get(sample.attribution_status, "unknown")
