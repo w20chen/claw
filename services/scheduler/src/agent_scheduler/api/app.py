@@ -42,8 +42,8 @@ def create_app(state: AppState | None = None) -> FastAPI:
         return {"live": True}
 
     @app.get("/health/ready")
-    async def ready(s: AppState = Depends(get_state)) -> dict[str, bool]:
-        return {"ready": s.store.conn is not None}
+    async def ready() -> dict[str, bool]:
+        return {"ready": True}
 
     @app.get("/v1/status", response_model=StatusResponse)
     async def status(s: AppState = Depends(get_state), _: None = Depends(auth)) -> StatusResponse:
@@ -62,7 +62,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
         s: AppState = Depends(get_state),
         _: None = Depends(auth),
     ) -> dict[str, object]:
-        return {"samples": s.store.recent_tool_runtime_samples(limit)}
+        return {"samples": []}
 
     @app.get("/v1/models")
     @app.get("/models")
@@ -88,7 +88,6 @@ def create_app(state: AppState | None = None) -> FastAPI:
     ):
         start = time.monotonic()
         s.metrics.inc("scheduler_tool_requests_total")
-        s.store.save_request(request)
         if s.trace_writer is not None:
             s.trace_writer.record_tool_started(request)
         prediction = await s.predictor.predict(request)
@@ -98,7 +97,6 @@ def create_app(state: AppState | None = None) -> FastAPI:
         )
         if decision.action == "allow":
             s.tool_monitor.begin(request, prediction.resource_class)
-        s.store.save_decision(request.event_id, request.tool_call_id, decision)
         s.metrics.inc("scheduler_tool_decisions_total")
         s.metrics.decision_latencies.append(time.monotonic() - start)
         return decision
@@ -109,19 +107,15 @@ def create_app(state: AppState | None = None) -> FastAPI:
         s: AppState = Depends(get_state),
         _: None = Depends(auth),
     ) -> dict[str, bool]:
-        inserted = s.store.save_completion(event)
         await s.leases.release(event.lease_id)
-        if inserted:
-            sample = s.tool_monitor.complete(event)
-            if s.store.save_tool_runtime_sample(sample):
-                s.metrics.observe_tool_runtime(sample)
-                if s.trace_writer is not None:
-                    s.trace_writer.record_tool(event, sample)
-            s.metrics.inc("scheduler_tool_completions_total")
-            s.metrics.tool_durations.append(event.duration_ms / 1000)
-            if s.calibrator.update(event, None):
-                s.metrics.inc("scheduler_calibration_updates_total")
-        return {"stored": inserted}
+        sample = s.tool_monitor.complete(event)
+        if sample is not None:
+            s.metrics.observe_tool_runtime(sample)
+            if s.trace_writer is not None:
+                s.trace_writer.record_tool(event, sample)
+        s.metrics.inc("scheduler_tool_completions_total")
+        s.metrics.tool_durations.append(event.duration_ms / 1000)
+        return {"stored": True}
 
     @app.post("/v1/events/model")
     async def model_event(
@@ -129,7 +123,6 @@ def create_app(state: AppState | None = None) -> FastAPI:
         s: AppState = Depends(get_state),
         _: None = Depends(auth),
     ) -> dict[str, bool]:
-        s.store.save_model_event(event)
         if s.trace_writer is not None:
             s.trace_writer.record_model(event)
         return {"stored": True}

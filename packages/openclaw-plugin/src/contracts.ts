@@ -1,3 +1,5 @@
+/** Plugin configuration and API contract types. */
+
 export type Mode = "observe" | "enforce";
 export type ExecutionBackend = "hook-only" | "marker" | "managed-wrapper";
 export type ProfilingMode = "off" | "proc" | "perf" | "ksys" | "vtune";
@@ -12,7 +14,7 @@ export type TracePluginConfig = {
   max_string_bytes: number;
   max_messages_bytes: number;
   max_tool_output_bytes: number;
-  trace_file_path: string;
+  trace_dir: string;
 };
 
 export type PluginConfig = {
@@ -21,18 +23,13 @@ export type PluginConfig = {
   decisionTimeoutMs: number;
   reportTimeoutMs: number;
   failOpen: boolean;
-  sendRawParams: boolean;
-  recordRawTrace: boolean;
   authTokenEnv: string;
   logLevel: "error" | "warn" | "info" | "debug";
   executionBackend: ExecutionBackend;
   launcherPath: string;
-  collectorSocket: string;
   instrumentHosts: string[];
   instrumentTools: string[];
   enableCgroup: boolean;
-  enableAffinity: boolean;
-  enableNuma: boolean;
   profilingMode: ProfilingMode;
   securityBoundaryAccepted: boolean;
   trace: TracePluginConfig;
@@ -108,26 +105,6 @@ export type ToolDecision = {
   profiling?: unknown | null;
 };
 
-export type ExecutionRegistrationRequest = {
-  execution_id: string;
-  tool_call_id: string | null;
-  run_id: string | null;
-  session_key_hash: string | null;
-  command_digest: string;
-  command: string;
-  workdir: string | null;
-  host: string;
-  placement: unknown | null;
-  profiling: unknown | null;
-  backend: "marker" | "managed-wrapper";
-};
-
-export type ExecutionRegistrationResponse = {
-  execution_id: string;
-  one_time_token: string;
-  expires_at: string;
-};
-
 export type ToolCompletedEvent = CommonEvent & {
   tool_call_id: string | null;
   decision_id: string | null;
@@ -155,4 +132,24 @@ export type ModelEvent = CommonEvent & {
   raw_input: unknown | null;
   raw_output: unknown | null;
   raw_event: unknown | null;
+};
+
+export type ExecutionRegistrationRequest = {
+  execution_id: string;
+  tool_call_id: string | null;
+  run_id: string | null;
+  session_key_hash: string | null;
+  command_digest: string;
+  command: string;
+  workdir: string | null;
+  host: string;
+  placement: unknown | null;
+  profiling: unknown | null;
+  backend: "marker" | "managed-wrapper";
+};
+
+export type ExecutionRegistrationResponse = {
+  execution_id: string;
+  one_time_token: string;
+  expires_at: string;
 };

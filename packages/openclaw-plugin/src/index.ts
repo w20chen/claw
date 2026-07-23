@@ -42,8 +42,54 @@ import { TRACE_SCHEMA_VERSION } from "./trace/schema.js";
 const pluginVersion = "0.1.0";
 
 // ── Plugin-wide state ──────────────────────────────────────────────────
-let writer: TraceWriter | null = null;
 let registry: SpanRegistry | null = null;
+
+/** Per-run trace writers, keyed by normalized run identity. */
+const runWriters = new Map<string, TraceWriter>();
+
+function safeFilename(segment: string | null): string {
+  if (!segment) return "unknown";
+  return segment.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").slice(0, 64);
+}
+
+async function getRunWriter(
+  traceDir: string,
+  runId: string | null,
+  sessionId: string | null,
+  agentId: string | null,
+  logger: { warn(message: string, data?: unknown): void },
+  flushSpanStart: boolean,
+): Promise<TraceWriter> {
+  const key = runId ?? "unknown-run";
+  const existing = runWriters.get(key);
+  if (existing) return existing;
+
+  const agent = safeFilename(agentId);
+  const session = safeFilename(sessionId);
+  const run = safeFilename(runId);
+  const filename = `${agent}_${session}_${run}.jsonl`;
+  const { join } = await import("node:path");
+  const filePath = join(traceDir, filename);
+
+  const traceLogger = { warn: (msg: string, d?: unknown) => logger.warn(msg, d), info: (_msg: string, _d?: unknown) => {}, error: (_msg: string, _d?: unknown) => {} };
+  const w = new TraceWriter(filePath, flushSpanStart, traceLogger);
+  await w.open();
+
+  const metadata: TraceMetadataRecord = {
+    schema_version: TRACE_SCHEMA_VERSION,
+    record_type: "trace_metadata",
+    trace_format_version: TRACE_SCHEMA_VERSION,
+    scaffold: "openclaw",
+    mode: "collect",
+    created_at: new Date().toISOString().replace("+00:00", "Z"),
+    clock_source: CLOCK_SOURCE_DESCRIPTION,
+    clock_precision: CLOCK_PRECISION,
+  };
+  w.writeRecord(metadata);
+
+  runWriters.set(key, w);
+  return w;
+}
 
 export default definePluginEntry({
   id: "hardware-scheduler",
@@ -58,18 +104,13 @@ export default definePluginEntry({
       decisionTimeoutMs: {type: "integer", default: 800, minimum: 1},
       reportTimeoutMs: {type: "integer", default: 800, minimum: 1},
       failOpen: {type: "boolean", default: true},
-      sendRawParams: {type: "boolean", default: false},
-      recordRawTrace: {type: "boolean", default: true},
       authTokenEnv: {type: "string", default: "OPENCLAW_SCHEDULER_TOKEN"},
       logLevel: {enum: ["error", "warn", "info", "debug"], default: "info"},
       executionBackend: {enum: ["hook-only", "marker", "managed-wrapper"], default: "hook-only"},
       launcherPath: {type: "string", default: "/opt/claw/bin/claw-launch"},
-      collectorSocket: {type: "string", default: "/run/claw/collector.sock"},
       instrumentHosts: {type: "array", items: {type: "string"}, default: ["gateway"]},
       instrumentTools: {type: "array", items: {type: "string"}, default: ["exec"]},
       enableCgroup: {type: "boolean", default: true},
-      enableAffinity: {type: "boolean", default: true},
-      enableNuma: {type: "boolean", default: true},
       profilingMode: {enum: ["off", "proc", "perf", "ksys", "vtune"], default: "off"},
       securityBoundaryAccepted: {type: "boolean", default: false},
       trace: {
@@ -85,7 +126,7 @@ export default definePluginEntry({
           max_string_bytes: {type: "integer", default: 16384},
           max_messages_bytes: {type: "integer", default: 131072},
           max_tool_output_bytes: {type: "integer", default: 65536},
-          trace_file_path: {type: "string", default: ""},
+          trace_dir: {type: "string", default: ""},
         },
       },
     }
@@ -96,27 +137,9 @@ export default definePluginEntry({
   const client = new SidecarClient(config);
   const correlation = new CorrelationMap(300_000, 10_000);
 
-  // Initialize trace v6 if trace_file_path is configured
+  // Initialize trace v6 if trace_dir is configured
   registry = new SpanRegistry();
   const traceCfg = config.trace;
-  if (traceCfg.trace_file_path && traceCfg.trace_file_path.length > 0) {
-    writer = new TraceWriter(traceCfg.trace_file_path, traceCfg.flush_span_start, logger);
-    writer.open().then(() => {
-      const metadata: TraceMetadataRecord = {
-        schema_version: TRACE_SCHEMA_VERSION,
-        record_type: "trace_metadata",
-        trace_format_version: TRACE_SCHEMA_VERSION,
-        scaffold: "openclaw",
-        mode: "collect",
-        created_at: new Date().toISOString().replace("+00:00", "Z"),
-        clock_source: CLOCK_SOURCE_DESCRIPTION,
-        clock_precision: CLOCK_PRECISION,
-      };
-      writer!.writeRecord(metadata);
-    }).catch(() => {
-      // best-effort
-    });
-  }
 
   // ── before_tool_call ──────────────────────────────────────────────
 
@@ -169,7 +192,7 @@ export default definePluginEntry({
     const hookParams = isRecord(event) ? (event as Record<string, unknown>).params ?? (event as Record<string, unknown>).arguments ?? (event as Record<string, unknown>).input ?? null : null;
 
     // Write span_start immediately (before any sidecar calls)
-    if (writer) {
+    if (traceCfg.trace_dir) {
       const spanStart: SpanStartRecord = {
         schema_version: TRACE_SCHEMA_VERSION,
         record_type: "span_start",
@@ -198,7 +221,7 @@ export default definePluginEntry({
           reason: correlationReason,
         } : undefined,
       };
-      writer.writeRecord(spanStart);
+      getRunWriter(traceCfg.trace_dir, runId, sessionId, agentId, logger, traceCfg.flush_span_start).then((w) => w.writeRecord(spanStart));
       if (registry) registry.markStartWritten(traceId, spanId);
     }
 
@@ -372,7 +395,7 @@ export default definePluginEntry({
     };
 
     // Write span_end
-    if (writer) {
+    if (traceCfg.trace_dir) {
       const seqNo = activeSpan?.sequenceNo ?? 0;
       const spanEnd: SpanEndRecord = {
         schema_version: TRACE_SCHEMA_VERSION,
@@ -408,7 +431,7 @@ export default definePluginEntry({
           reason: "span_start_not_found",
         } : undefined,
       };
-      writer.writeRecord(spanEnd);
+      getRunWriter(traceCfg.trace_dir, runId, activeSpan?.sessionId ?? null, activeSpan?.agentId ?? null, logger, traceCfg.flush_span_start).then((w) => w.writeRecord(spanEnd));
     }
   });
 
@@ -446,8 +469,8 @@ export default definePluginEntry({
       });
     }
 
-    // Write span_start
-    if (writer) {
+    // Write span_start for LLM
+    if (traceCfg.trace_dir) {
       const hookInput = extractModelInput(event);
       const spanStart: SpanStartRecord = {
         schema_version: TRACE_SCHEMA_VERSION,
@@ -476,8 +499,10 @@ export default definePluginEntry({
           execution_id: null,
         },
       };
-      writer.writeRecord(spanStart);
-      if (registry) registry.markStartWritten(traceId, spanId);
+      getRunWriter(traceCfg.trace_dir, runId, sessionId, agentId, logger, traceCfg.flush_span_start).then((w) => {
+        w.writeRecord(spanStart);
+        if (registry) registry.markStartWritten(traceId, spanId);
+      });
     }
 
     // Original sidecar logic
@@ -542,8 +567,8 @@ export default definePluginEntry({
       statusCode = "cancelled";
     }
 
-    // Write span_end
-    if (writer) {
+    // Write span_end for LLM
+    if (traceCfg.trace_dir) {
       const hookOutput = extractModelOutput(event);
       const spanEnd: SpanEndRecord = {
         schema_version: TRACE_SCHEMA_VERSION,
@@ -593,7 +618,7 @@ export default definePluginEntry({
           reason: "span_start_not_found",
         } : undefined,
       };
-      writer.writeRecord(spanEnd);
+      getRunWriter(traceCfg.trace_dir, runId, activeSpan?.sessionId ?? null, activeSpan?.agentId ?? null, logger, traceCfg.flush_span_start).then((w) => w.writeRecord(spanEnd));
     }
 
     // Original sidecar logic
@@ -602,8 +627,8 @@ export default definePluginEntry({
 
   // ── Shutdown handling ────────────────────────────────────────────────
   // Write interrupted spans when plugin is being unloaded
-  process.on("beforeExit", () => {
-    if (registry && writer) {
+  process.on("beforeExit", async () => {
+    if (registry && runWriters.size > 0) {
       const activeSpans = registry.listActiveSpans();
       const endWall = wallClockNowNs();
       const endMono = monotonicNowNs();
@@ -648,7 +673,13 @@ export default definePluginEntry({
             coverage_reason: "pid_unavailable",
           },
         };
-        writer.writeRecord(spanEnd);
+        // Write to the span's run writer
+        const w = runWriters.get(span.runId ?? span.traceId);
+        if (w) w.writeRecord(spanEnd);
+      }
+      // Close all writers on shutdown
+      for (const w of runWriters.values()) {
+        await w.close();
       }
     }
   });
@@ -670,10 +701,9 @@ function common(event: unknown): CommonEvent {
   };
 }
 
-function buildToolBefore(event: unknown, config: PluginConfig): ToolBeforeRequest {
+function buildToolBefore(event: unknown, _config: PluginConfig): ToolBeforeRequest {
   const params = isRecord(event) ? (event as Record<string, unknown>).params ?? (event as Record<string, unknown>).arguments ?? (event as Record<string, unknown>).input ?? null : null;
   const safeParams = redact(params);
-  const rawParams = config.recordRawTrace ? jsonSafe(params) : config.sendRawParams ? safeParams : null;
   const toolName = extractString(event, ["tool_name", "toolName", "name"]) ?? "unknown";
   return {
     ...common(event),
@@ -685,8 +715,8 @@ function buildToolBefore(event: unknown, config: PluginConfig): ToolBeforeReques
     derived_paths: [],
     params_digest: stableDigest(safeParams),
     param_features: paramFeatures(safeParams),
-    raw_params: rawParams,
-    raw_event: config.recordRawTrace ? jsonSafe(event) : null,
+    raw_params: null,
+    raw_event: null,
     resource_scope: null
   };
 }
@@ -812,11 +842,9 @@ function mergeContext(payload: CommonEvent, context: unknown): void {
 function buildCompletion(
   event: unknown,
   prior: {decisionId: string | null; leaseId: string | null; executionId: string | null} | null,
-  config: PluginConfig
+  _config: PluginConfig
 ): ToolCompletedEvent {
   const errorType = extractString(event, ["error_type", "errorType"]);
-  const rawResult = config.recordRawTrace ? jsonSafe(extractToolResult(event)) : null;
-  const rawEvent = config.recordRawTrace ? jsonSafe(sanitizeCompletionRawEvent(event, config)) : null;
   return {
     ...common(event),
     tool_call_id: extractString(event, ["tool_call_id", "toolCallId", "id"]),
@@ -829,40 +857,10 @@ function buildCompletion(
     error_type: errorType,
     error_digest: null,
     result_size_bytes: extractNumber(event, ["result_size_bytes", "resultSizeBytes"]),
-    raw_result: rawResult,
-    raw_event: rawEvent,
+    raw_result: null,
+    raw_event: null,
     resource_scope: null
   };
-}
-
-function sanitizeCompletionRawEvent(event: unknown, config: PluginConfig): unknown {
-  const safe = jsonSafe(event);
-  if (!isRecord(safe)) return safe;
-  const params = (safe as Record<string, unknown>).params;
-  if (!isRecord(params)) return safe;
-  if (!isManagedWrapperCommand((params as Record<string, unknown>).command, config)) return safe;
-  return {
-    ...safe,
-    params: {
-      ...params,
-      command: "<managed execution wrapper redacted>",
-      env: redactManagedWrapperEnv((params as Record<string, unknown>).env)
-    }
-  };
-}
-
-function isManagedWrapperCommand(value: unknown, config: PluginConfig): boolean {
-  if (typeof value !== "string") return false;
-  return value.includes("claw-launch") || value.includes(config.launcherPath);
-}
-
-function redactManagedWrapperEnv(value: unknown): unknown {
-  if (!isRecord(value)) return value;
-  const output: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    output[key] = key.startsWith("CLAW_") ? "<redacted>" : item;
-  }
-  return output;
 }
 
 async function reportModel(
@@ -870,7 +868,7 @@ async function reportModel(
   logger: {warn(message: string, data?: unknown): void},
   event: unknown,
   eventType: "model_call_started" | "model_call_ended",
-  config: PluginConfig
+  _config: PluginConfig
 ): Promise<void> {
   try {
     const payload: ModelEvent = {
@@ -882,9 +880,9 @@ async function reportModel(
       duration_ms: extractNumber(event, ["duration_ms", "durationMs"]),
       outcome: extractString(event, ["outcome", "status"]),
       context_token_budget: extractNumber(event, ["context_token_budget", "contextTokenBudget"]),
-      raw_input: config.recordRawTrace ? jsonSafe(extractModelInput(event)) : null,
-      raw_output: config.recordRawTrace ? jsonSafe(extractModelOutput(event)) : null,
-      raw_event: config.recordRawTrace ? jsonSafe(event) : null
+      raw_input: null,
+      raw_output: null,
+      raw_event: null
     };
     await client.reportModel(payload);
   } catch (error) {
@@ -930,12 +928,6 @@ function extractToolCallsFromResponse(event: unknown): string[] {
   }
 
   return [];
-}
-
-function extractToolResult(event: unknown): unknown {
-  if (!isRecord(event)) return null;
-  const evt = event as Record<string, unknown>;
-  return evt.result ?? evt.output ?? evt.response ?? evt.content ?? evt.data ?? evt.toolResult ?? null;
 }
 
 function extractModelInput(event: unknown): unknown {

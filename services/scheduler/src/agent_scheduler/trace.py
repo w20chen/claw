@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
-import time
 from uuid import uuid4
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,31 +12,47 @@ from agent_scheduler.contracts.models import ModelEvent, ToolBeforeRequest, Tool
 from agent_scheduler.monitoring.tool_runtime import ToolRuntimeSample
 
 
-class AgentTestBenchTraceWriter:
-    """Trace writer supporting both v5 (legacy) and v6 (span-based) formats.
+def _safe_filename(segment: str | None) -> str:
+    if not segment:
+        return "unknown"
+    return re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", segment)[:64]
 
-    Set schema_version=6 to write span_start/span_end pairs.
-    Set schema_version=5 for backward-compatible single-line actions.
+
+class AgentTestBenchTraceWriter:
+    """Per-run trace writer. Creates one JSONL file per run under trace_dir.
+
+    Files are named: {agent_id}_{session_id}_{run_id}.jsonl
     """
 
-    def __init__(
-        self,
-        path: Path,
-        *,
-        scaffold: str = "openclaw",
-        schema_version: int = 5,
-    ) -> None:
-        self.path = path
+    def __init__(self, trace_dir: Path, *, scaffold: str = "openclaw") -> None:
+        self.trace_dir = trace_dir
         self.scaffold = scaffold
-        self.schema_version = schema_version
         self._lock = threading.Lock()
         self._model_starts: dict[str, ModelEvent] = {}
         self._tool_starts: dict[str, ToolBeforeRequest] = {}
         self._recent_proxy_calls: list[dict[str, Any]] = []
-        self._seq_counter = 0
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        if not self.path.exists() or self.path.stat().st_size == 0:
-            self._append(self._metadata_record())
+        self._seq_counters: dict[str, int] = {}
+        self._files: dict[str, Path] = {}
+        self.trace_dir.mkdir(parents=True, exist_ok=True)
+
+    def _file_for_run(self, run_id: str | None, session_id: str | None, agent_id: str | None) -> Path:
+        key = run_id or "unknown-run"
+        if key in self._files:
+            return self._files[key]
+        agent = _safe_filename(agent_id)
+        session = _safe_filename(session_id)
+        run = _safe_filename(run_id)
+        filename = f"{agent}_{session}_{run}.jsonl"
+        filepath = self.trace_dir / filename
+        self._files[key] = filepath
+        return filepath
+
+    def _next_seq(self, run_id: str | None) -> int:
+        key = run_id or "unknown-run"
+        current = self._seq_counters.get(key, 0)
+        current += 1
+        self._seq_counters[key] = current
+        return current
 
     def record_tool_started(self, event: ToolBeforeRequest) -> None:
         self._tool_starts[_tool_key(event.tool_call_id, event.event_id)] = event
@@ -45,45 +61,7 @@ class AgentTestBenchTraceWriter:
         start = self._pop_tool_start(event)
         tool_args = None if start is None else start.raw_params
         ts_start, ts_end = _tool_timestamps(sample, event.duration_ms)
-
-        if self.schema_version >= 6:
-            self._record_tool_v6(event, sample, start, tool_args, ts_start, ts_end)
-        else:
-            self._record_tool_v5(event, sample, start, tool_args, ts_start, ts_end)
-
-    def _record_tool_v5(
-        self,
-        event: ToolCompletedEvent,
-        sample: ToolRuntimeSample,
-        start: ToolBeforeRequest | None,
-        tool_args: Any,
-        ts_start: float,
-        ts_end: float,
-    ) -> None:
-        self._append(
-            {
-                "type": "action",
-                "action_type": "tool_exec",
-                "action_id": event.tool_call_id or event.event_id,
-                "run_id": event.run_id,
-                "session_id": event.session_id,
-                "session_key": event.session_key,
-                "agent_id": event.agent_id or _agent_id_from_session_key(event.session_key),
-                "ts_start": ts_start,
-                "ts_end": ts_end,
-                "data": {
-                    "tool_name": event.tool_name,
-                    "tool_args": tool_args,
-                    "tool_result": event.raw_result,
-                    "duration_ms": float(event.duration_ms),
-                    "success": event.succeeded,
-                    "error": event.error_type,
-                    "resource_usage": _resource_usage(sample),
-                    "openclaw_before_event": None if start is None else start.raw_event,
-                    "openclaw_after_event": event.raw_event,
-                },
-            }
-        )
+        self._record_tool_v6(event, sample, start, tool_args, ts_start, ts_end)
 
     def _record_tool_v6(
         self,
@@ -96,17 +74,15 @@ class AgentTestBenchTraceWriter:
     ) -> None:
         trace_id = event.run_id or "unknown-run"
         span_id = event.tool_call_id or event.event_id
-        parent_span_id = None  # Python sidecar doesn't track LLM span lineage
+        parent_span_id = None
         run_id = event.run_id
         session_id = event.session_id
         agent_id = event.agent_id or _agent_id_from_session_key(event.session_key)
 
-        self._seq_counter += 1
-        seq_no = self._seq_counter
+        seq_no = self._next_seq(run_id)
 
         wall_start_ns = str(int(ts_start * 1_000_000_000))
         wall_end_ns = str(int(ts_end * 1_000_000_000))
-        # Monotonic not available in Python sidecar trace; use wall as fallback
         mono_start_ns = wall_start_ns
         mono_end_ns = wall_end_ns
         duration_ns = str(int(max(0, event.duration_ms) * 1_000_000))
@@ -116,8 +92,11 @@ class AgentTestBenchTraceWriter:
         scope = start.resource_scope if start is not None else None
         has_pid = scope is not None and scope.pid is not None
 
-        # span_start (written retroactively, so time_quality is "derived")
-        self._append({
+        filepath = self._file_for_run(run_id, session_id, agent_id)
+        self._ensure_metadata(filepath)
+
+        # span_start
+        self._append(filepath, {
             "schema_version": 6,
             "record_type": "span_start",
             "trace_id": trace_id,
@@ -131,9 +110,7 @@ class AgentTestBenchTraceWriter:
             "name": event.tool_name,
             "wall_time_ns": wall_start_ns,
             "monotonic_time_ns": mono_start_ns,
-            "input": {
-                "requested_args": tool_args,
-            },
+            "input": {"requested_args": tool_args},
             "execution": {
                 "mode": "launcher" if event.execution_id else "in_process_or_runtime_managed",
                 "execution_id": event.execution_id,
@@ -141,7 +118,7 @@ class AgentTestBenchTraceWriter:
         })
 
         # span_end
-        self._append({
+        self._append(filepath, {
             "schema_version": 6,
             "record_type": "span_end",
             "trace_id": trace_id,
@@ -156,14 +133,8 @@ class AgentTestBenchTraceWriter:
             "wall_time_ns": wall_end_ns,
             "monotonic_time_ns": mono_end_ns,
             "duration_ns": duration_ns,
-            "status": {
-                "code": status_code,
-                "message": event.error_type,
-            },
-            "output": {
-                "exit_code": 0 if event.succeeded else None,
-                "result": event.raw_result,
-            },
+            "status": {"code": status_code, "message": event.error_type},
+            "output": {"exit_code": 0 if event.succeeded else None, "result": event.raw_result},
             "execution": {
                 "mode": "launcher" if event.execution_id else "in_process_or_runtime_managed",
                 "execution_id": event.execution_id,
@@ -200,53 +171,7 @@ class AgentTestBenchTraceWriter:
         duration_s = (event.duration_ms or 0) / 1000
         ts_start = _parse_timestamp(start.occurred_at) if start is not None else ts_end - duration_s
         proxy_data = proxy_call.get("data", {}) if isinstance(proxy_call, dict) else {}
-
-        if self.schema_version >= 6:
-            self._record_model_v6(event, start, ts_start, ts_end, proxy_data)
-        else:
-            self._record_model_v5(event, start, ts_start, ts_end, proxy_data)
-
-    def _record_model_v5(
-        self,
-        event: ModelEvent,
-        start: ModelEvent | None,
-        ts_start: float,
-        ts_end: float,
-        proxy_data: dict[str, Any],
-    ) -> None:
-        self._append(
-            {
-                "type": "action",
-                "action_type": "llm_call",
-                "action_id": event.call_id or event.event_id,
-                "run_id": event.run_id,
-                "session_id": event.session_id,
-                "session_key": event.session_key,
-                "agent_id": event.agent_id or _agent_id_from_session_key(event.session_key),
-                "ts_start": ts_start,
-                "ts_end": ts_end,
-                "data": {
-                    "provider": event.provider,
-                    "model": event.model,
-                    "messages_in": _first_present(
-                        None if start is None else start.raw_input,
-                        proxy_data.get("messages_in"),
-                    ),
-                    "content": _first_present(event.raw_output, proxy_data.get("content")),
-                    "duration_ms": event.duration_ms,
-                    "llm_latency_ms": (
-                        float(event.duration_ms) if event.duration_ms is not None else None
-                    ),
-                    "outcome": event.outcome,
-                    "context_token_budget": event.context_token_budget,
-                    "openclaw_started_event": None if start is None else start.raw_event,
-                    "openclaw_ended_event": event.raw_event,
-                    "raw_request": proxy_data.get("raw_request"),
-                    "raw_response": proxy_data.get("raw_response"),
-                    "proxy": proxy_data.get("proxy"),
-                },
-            }
-        )
+        self._record_model_v6(event, start, ts_start, ts_end, proxy_data)
 
     def _record_model_v6(
         self,
@@ -262,8 +187,7 @@ class AgentTestBenchTraceWriter:
         session_id = event.session_id
         agent_id = event.agent_id or _agent_id_from_session_key(event.session_key)
 
-        self._seq_counter += 1
-        seq_no = self._seq_counter
+        seq_no = self._next_seq(run_id)
 
         wall_start_ns = str(int(ts_start * 1_000_000_000))
         wall_end_ns = str(int(ts_end * 1_000_000_000))
@@ -271,13 +195,15 @@ class AgentTestBenchTraceWriter:
 
         status_code = "ok" if event.outcome in ("completed", "ok", "success") else ("error" if event.outcome == "error" else "unknown")
 
-        # Don't duplicate messages_in (v6 stores in input.messages only)
         messages = _first_present(
             None if start is None else start.raw_input,
             proxy_data.get("messages_in"),
         )
 
-        self._append({
+        filepath = self._file_for_run(run_id, session_id, agent_id)
+        self._ensure_metadata(filepath)
+
+        self._append(filepath, {
             "schema_version": 6,
             "record_type": "span_start",
             "trace_id": trace_id,
@@ -291,17 +217,11 @@ class AgentTestBenchTraceWriter:
             "name": event.model or "unknown-model",
             "wall_time_ns": wall_start_ns,
             "monotonic_time_ns": wall_start_ns,
-            "input": {
-                "requested_args": None,
-                "messages": messages,
-            },
-            "execution": {
-                "mode": None,
-                "execution_id": None,
-            },
+            "input": {"requested_args": None, "messages": messages},
+            "execution": {"mode": None, "execution_id": None},
         })
 
-        self._append({
+        self._append(filepath, {
             "schema_version": 6,
             "record_type": "span_end",
             "trace_id": trace_id,
@@ -316,17 +236,9 @@ class AgentTestBenchTraceWriter:
             "wall_time_ns": wall_end_ns,
             "monotonic_time_ns": wall_end_ns,
             "duration_ns": duration_ns,
-            "status": {
-                "code": status_code,
-                "message": None,
-            },
-            "output": {
-                "content": event.raw_output,
-            },
-            "execution": {
-                "mode": None,
-                "execution_id": None,
-            },
+            "status": {"code": status_code, "message": None},
+            "output": {"content": event.raw_output},
+            "execution": {"mode": None, "execution_id": None},
             "resources": {
                 "attribution_status": "not_applicable",
                 "scope": "none",
@@ -378,11 +290,7 @@ class AgentTestBenchTraceWriter:
                 "llm_latency_ms": duration_ms,
                 "outcome": "error" if error else "completed",
                 "context_token_budget": None,
-                "proxy": {
-                    "status_code": status_code,
-                    "stream": stream,
-                    "error": error,
-                },
+                "proxy": {"status_code": status_code, "stream": stream, "error": error},
                 "openclaw_started_event": None,
                 "openclaw_ended_event": None,
                 "raw_request": raw_request,
@@ -391,32 +299,22 @@ class AgentTestBenchTraceWriter:
         }
         self._remember_proxy_call(record)
 
-    def _append(self, record: dict[str, Any]) -> None:
+    def _ensure_metadata(self, filepath: Path) -> None:
+        if filepath.exists() and filepath.stat().st_size > 0:
+            return
+        self._append(filepath, self._metadata_record())
+
+    def _append(self, filepath: Path, record: dict[str, Any]) -> None:
         line = json.dumps(record, sort_keys=True, separators=(",", ":"))
         with self._lock:
-            with self.path.open("a", encoding="utf-8") as fh:
-                if record.get("type") != "trace_metadata" and self.path.stat().st_size == 0:
-                    metadata = json.dumps(
-                        self._metadata_record(),
-                        sort_keys=True,
-                        separators=(",", ":"),
-                    )
-                    fh.write(metadata + "\n")
+            with filepath.open("a", encoding="utf-8") as fh:
                 fh.write(line + "\n")
 
     def _metadata_record(self) -> dict[str, Any]:
-        if self.schema_version >= 6:
-            return {
-                "schema_version": 6,
-                "record_type": "trace_metadata",
-                "trace_format_version": 6,
-                "scaffold": self.scaffold,
-                "mode": "collect",
-                "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            }
         return {
-            "type": "trace_metadata",
-            "trace_format_version": 5,
+            "schema_version": 6,
+            "record_type": "trace_metadata",
+            "trace_format_version": 6,
             "scaffold": self.scaffold,
             "mode": "collect",
             "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -499,37 +397,6 @@ def _first_present(*values: Any) -> Any | None:
         if value is not None:
             return value
     return None
-
-
-def _resource_usage(sample: ToolRuntimeSample) -> dict[str, Any]:
-    return {
-        "attribution_status": sample.attribution_status,
-        "monitor_source": sample.monitor_source,
-        "sampling_interval_ms": sample.sampling_interval_ms,
-        "sampling_point_count": sample.sampling_point_count,
-        "sampling_quality": sample.sampling_quality,
-        "cpu_time_delta_s": sample.cpu_time_delta_s,
-        "cpu_utilization_avg_cores": sample.cpu_utilization_avg_cores,
-        "cpu_utilization_avg_pct": sample.cpu_utilization_avg_pct,
-        "memory_rss_bytes_before": sample.rss_bytes_before,
-        "memory_rss_bytes_after": sample.rss_bytes_after,
-        "memory_rss_bytes_peak": sample.rss_bytes_peak,
-        "memory_footprint_bytes": sample.rss_bytes_peak,
-        "disk_read_bytes_delta": sample.read_bytes_delta,
-        "disk_write_bytes_delta": sample.write_bytes_delta,
-        "disk_read_bytes_per_s": sample.disk_read_bytes_per_s,
-        "disk_write_bytes_per_s": sample.disk_write_bytes_per_s,
-        "net_rx_bytes_delta": sample.net_rx_bytes_delta,
-        "net_tx_bytes_delta": sample.net_tx_bytes_delta,
-        "net_rx_bytes_per_s": sample.net_rx_bytes_per_s,
-        "net_tx_bytes_per_s": sample.net_tx_bytes_per_s,
-        "context_switches_delta": sample.ctx_switches_delta,
-        "target_pid": sample.target_pid,
-        "process_count_before": sample.process_count_before,
-        "process_count_after": sample.process_count_after,
-        "timeline_truncated": sample.resource_timeline_truncated,
-        "timeline": sample.resource_timeline,
-    }
 
 
 def _v6_attribution(sample: ToolRuntimeSample) -> str:

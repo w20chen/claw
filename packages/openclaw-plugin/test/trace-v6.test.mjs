@@ -20,7 +20,6 @@ const traceRegistry = await import("../dist/trace/registry.js");
 const traceSanitizer = await import("../dist/trace/sanitizer.js");
 const traceValidator = await import("../dist/trace/validator.js");
 const traceCoverage = await import("../dist/trace/resource-coverage.js");
-const traceNormalize = await import("../dist/trace/normalize.js");
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -189,6 +188,49 @@ test("writer writes metadata and span records", async () => {
     assert.ok(typeof parsed === "object");
   }
   await unlink(path);
+});
+
+test("per-run writers create separate files", async () => {
+  const dir = join(tmpdir(), `trace-v6-test-dir-${randomUUID()}`);
+  const { mkdirSync } = await import("node:fs");
+  mkdirSync(dir, { recursive: true });
+
+  const { consoleLogger } = await import("../dist/logging.js");
+  const w1 = new traceWriter.TraceWriter(join(dir, "main_sess1_run1.jsonl"), true, consoleLogger);
+  const w2 = new traceWriter.TraceWriter(join(dir, "main_sess2_run2.jsonl"), true, consoleLogger);
+  await w1.open();
+  await w2.open();
+
+  w1.writeRecord({
+    schema_version: 6, record_type: "span_start",
+    trace_id: "run1", span_id: "s1", parent_span_id: null,
+    session_id: "sess1", run_id: "run1", agent_id: "main",
+    sequence_no: 1, kind: "tool", name: "exec",
+    wall_time_ns: "100", monotonic_time_ns: "100",
+    input: { requested_args: {} },
+    execution: { mode: null, execution_id: null },
+  });
+  w2.writeRecord({
+    schema_version: 6, record_type: "span_start",
+    trace_id: "run2", span_id: "s2", parent_span_id: null,
+    session_id: "sess2", run_id: "run2", agent_id: "main",
+    sequence_no: 1, kind: "tool", name: "write",
+    wall_time_ns: "200", monotonic_time_ns: "200",
+    input: { requested_args: {} },
+    execution: { mode: null, execution_id: null },
+  });
+
+  await w1.close();
+  await w2.close();
+
+  // Verify files exist separately
+  const { readFileSync, existsSync } = await import("node:fs");
+  assert.ok(existsSync(join(dir, "main_sess1_run1.jsonl")));
+  assert.ok(existsSync(join(dir, "main_sess2_run2.jsonl")));
+
+  // Cleanup
+  const { rmSync } = await import("node:fs");
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test("writer does not interleave concurrent writes", async () => {
@@ -383,46 +425,6 @@ test("coverage: monitor error", () => {
   });
   assert.equal(result.attributionStatus, "failed");
   assert.equal(result.coverageReason, "monitor_error");
-});
-
-// ── V5 Normalization Tests ────────────────────────────────────────────
-
-test("normalize v5 tool record to v6 spans", () => {
-  const v5 = {
-    type: "action",
-    action_type: "tool_exec",
-    action_id: "act-1",
-    run_id: "run-1",
-    session_id: "sess-1",
-    session_key: null,
-    agent_id: "main",
-    ts_start: 1000.0,
-    ts_end: 1002.0,
-    data: {
-      tool_name: "exec",
-      tool_args: { command: "ls" },
-      tool_result: "file1\nfile2",
-      duration_ms: 2000,
-      success: true,
-      error: null,
-      resource_usage: {
-        target_pid: 12345,
-        cpu_time_delta_s: 0.5,
-        memory_rss_bytes_peak: 4096,
-        attribution_status: "pid",
-      },
-    },
-  };
-
-  const result = traceNormalize.normalizeV5ToV6(v5);
-  assert.ok(result !== null);
-  const [start, end] = result;
-  assert.equal(start.record_type, "span_start");
-  assert.equal(end.record_type, "span_end");
-  assert.equal(start.kind, "tool");
-  assert.equal(start.name, "exec");
-  assert.equal(end.status.code, "ok");
-  assert.equal(start.input.requested_args.command, "ls");
 });
 
 // ── JSONL Legality Test ───────────────────────────────────────────────

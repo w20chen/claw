@@ -2,11 +2,12 @@
 
 ## Overview
 
-Trace v6 models every LLM call and tool execution as a **span**. Each span is
-written as two separate JSONL records: `span_start` (written before execution
-begins) and `span_end` (written after completion).
+Every LLM call and tool execution is modeled as a **span**. Each span is
+written as two JSONL records: `span_start` (before execution) and `span_end`
+(after completion). One trace file captures all tool/LLM input, output, and
+resource usage.
 
-This replaces the v5 single-line complete-action model, solving several problems:
+**This is the only trace format. There is no backwards compatibility layer.**
 
 - Action start is recorded even if the process crashes before completion
 - Explicit `parent_span_id` links tool spans to the LLM call that produced them
@@ -304,29 +305,22 @@ uses the original values.
     "max_string_bytes": 16384,
     "max_messages_bytes": 131072,
     "max_tool_output_bytes": 65536,
-    "trace_file_path": "/var/log/claw/trace.jsonl"
+    "trace_dir": "/var/log/claw/traces"
   }
 }
 ```
 
-- `trace_file_path`: Set to a writable path to enable tracing. Empty string
-  disables tracing.
-- `include_raw_events`: When true, includes the raw OpenClaw hook payloads
-  (sanitized). Default false to keep file sizes manageable.
+- `trace_dir`: Set to a writable directory. Each run produces its own file
+  named `{agent_id}_{session_id}_{run_id}.jsonl`. Empty string disables tracing.
 
-## Reading v5 Traces
+### Scheduler sidecar configuration
 
-A TypeScript normalizer is available:
-
-```ts
-import { normalizeV5ToV6 } from "./trace/normalize.js";
-const [spanStart, spanEnd] = normalizeV5ToV6(v5Record);
+Set the environment variable:
+```bash
+export AGENT_SCHEDULER_TRACE_DIR=/var/log/claw/traces
 ```
 
-Limitations of v5→v6 conversion:
-- `parent_span_id` is always `null` (v5 had no explicit parent)
-- Monotonic timestamps are derived from wall clock (marked as fallback)
-- Resource coverage metadata is unavailable
+The scheduler writes to the same per-run file pattern.
 
 ## Validator
 

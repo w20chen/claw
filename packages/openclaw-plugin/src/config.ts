@@ -6,18 +6,13 @@ const defaults: PluginConfig = {
   decisionTimeoutMs: 800,
   reportTimeoutMs: 800,
   failOpen: true,
-  sendRawParams: false,
-  recordRawTrace: true,
   authTokenEnv: "OPENCLAW_SCHEDULER_TOKEN",
   logLevel: "info",
   executionBackend: "hook-only",
   launcherPath: "/opt/claw/bin/claw-launch",
-  collectorSocket: "/run/claw/collector.sock",
   instrumentHosts: ["gateway"],
   instrumentTools: ["exec"],
   enableCgroup: true,
-  enableAffinity: true,
-  enableNuma: true,
   profilingMode: "off",
   securityBoundaryAccepted: false,
   trace: {
@@ -30,7 +25,7 @@ const defaults: PluginConfig = {
     max_string_bytes: 16384,
     max_messages_bytes: 131072,
     max_tool_output_bytes: 65536,
-    trace_file_path: "",
+    trace_dir: "",
   },
 };
 
@@ -46,11 +41,8 @@ export function loadConfig(input: unknown): PluginConfig {
   if (!Number.isInteger(config.reportTimeoutMs) || config.reportTimeoutMs <= 0) {
     throw new Error("reportTimeoutMs must be a positive integer");
   }
-  if (typeof config.sendRawParams !== "boolean") {
-    throw new Error("sendRawParams must be a boolean");
-  }
-  if (typeof config.recordRawTrace !== "boolean") {
-    throw new Error("recordRawTrace must be a boolean");
+  if (typeof config.failOpen !== "boolean") {
+    throw new Error("failOpen must be a boolean");
   }
   if (!["hook-only", "marker", "managed-wrapper"].includes(String(config.executionBackend))) {
     throw new Error(`invalid executionBackend: ${String(config.executionBackend)}`);
@@ -60,9 +52,6 @@ export function loadConfig(input: unknown): PluginConfig {
   }
   if (typeof config.launcherPath !== "string" || config.launcherPath.length === 0) {
     throw new Error("launcherPath must be a non-empty string");
-  }
-  if (typeof config.collectorSocket !== "string" || config.collectorSocket.length === 0) {
-    throw new Error("collectorSocket must be a non-empty string");
   }
   if (!Array.isArray(config.instrumentHosts) || !config.instrumentHosts.every((item) => typeof item === "string")) {
     throw new Error("instrumentHosts must be an array of strings");
@@ -87,7 +76,6 @@ function envOverrides(): Partial<PluginConfig> {
   setString(output, "launcherPath", process.env.OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH);
   setString(output, "executionBackend", process.env.OPENCLAW_HARDWARE_SCHEDULER_EXECUTION_BACKEND);
   setBoolean(output, "failOpen", process.env.OPENCLAW_HARDWARE_SCHEDULER_FAIL_OPEN);
-  setBoolean(output, "recordRawTrace", process.env.OPENCLAW_HARDWARE_SCHEDULER_RECORD_RAW_TRACE);
   setBoolean(
     output,
     "securityBoundaryAccepted",

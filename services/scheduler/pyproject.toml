@@ -13,7 +13,6 @@ dependencies = [
   "pydantic>=2",
   "psutil>=5.9",
   "uvicorn>=0.27",
-  "aiosqlite>=0.19",
   "prometheus-client>=0.20"
 ]
 

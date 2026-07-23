@@ -253,7 +253,7 @@ export interface TraceConfig {
   max_messages_bytes: number;
   max_tool_output_bytes: number;
   /** Path to the trace JSONL output file. If empty/null, tracing is disabled. */
-  trace_file_path: string;
+  trace_dir: string;
 }
 
 export const DEFAULT_TRACE_CONFIG: TraceConfig = {
@@ -266,5 +266,5 @@ export const DEFAULT_TRACE_CONFIG: TraceConfig = {
   max_string_bytes: 16384,
   max_messages_bytes: 131072,
   max_tool_output_bytes: 65536,
-  trace_file_path: "",
+  trace_dir: "",
 };

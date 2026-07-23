@@ -15,26 +15,25 @@ from agent_scheduler.monitoring.tool_runtime import _relative_timeline
 
 
 def _client(tmp_path: Path) -> TestClient:
-    state = build_state(SchedulerConfig(db_path=tmp_path / "test.sqlite3"))
+    state = build_state(SchedulerConfig())
     return TestClient(create_app(state))
 
 
 def _trace_client(tmp_path: Path) -> tuple[TestClient, Path]:
-    trace_path = tmp_path / "trace.jsonl"
-    state = build_state(SchedulerConfig(db_path=tmp_path / "test.sqlite3", trace_path=trace_path))
-    return TestClient(create_app(state)), trace_path
+    trace_dir = tmp_path / "traces"
+    state = build_state(SchedulerConfig(trace_dir=trace_dir))
+    return TestClient(create_app(state)), trace_dir
 
 
 def _trace_proxy_client(tmp_path: Path) -> tuple[TestClient, Path]:
-    trace_path = tmp_path / "trace.jsonl"
+    trace_dir = tmp_path / "traces"
     state = build_state(
         SchedulerConfig(
-            db_path=tmp_path / "test.sqlite3",
-            trace_path=trace_path,
+            trace_dir=trace_dir,
             llm_proxy_upstream_base_url="https://upstream.example/v1",
         )
     )
-    return TestClient(create_app(state)), trace_path
+    return TestClient(create_app(state)), trace_dir
 
 
 def test_decision_and_completion_round_trip(tmp_path: Path) -> None:
@@ -189,7 +188,7 @@ def test_resource_timeline_uses_interval_rates() -> None:
 
 
 def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Path) -> None:
-    client, trace_path = _trace_client(tmp_path)
+    client, trace_dir = _trace_client(tmp_path)
     request: dict[str, object] = {
         "schema_version": "scheduler.v1",
         "event_id": "evt-trace-before",
@@ -276,11 +275,14 @@ def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Pa
     assert client.post("/v1/events/model", json=model_started).json() == {"stored": True}
     assert client.post("/v1/events/model", json=model_ended).json() == {"stored": True}
 
-    records = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
-    assert records[0]["type"] == "trace_metadata"
-    assert records[0]["trace_format_version"] == 5
+    # Find the per-run trace file
+    trace_files = list(trace_dir.glob("*.jsonl"))
+    assert len(trace_files) >= 1
+    records = [json.loads(line) for line in trace_files[0].read_text(encoding="utf-8").splitlines()]
+    assert records[0]["record_type"] == "trace_metadata"
+    assert records[0]["schema_version"] == 6
 
-    tool_records = [record for record in records if record.get("action_type") == "tool_exec"]
+    tool_starts = [r for r in records if r.get("record_type") == "span_start" and r.get("kind") == "tool"]
     assert len(tool_records) == 1
     tool_record = tool_records[0]
     assert tool_record["type"] == "action"

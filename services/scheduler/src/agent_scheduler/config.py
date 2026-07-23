@@ -11,17 +11,13 @@ DEFAULT_LLM_UPSTREAM_BASE_URL = "https://api.deepseek.com"
 
 @dataclass(frozen=True)
 class SchedulerConfig:
-    db_path: Path = Path("scheduler.sqlite3")
     policy: str = "observe-only"
     max_global_concurrency: int = 4
     lease_ttl_ms: int = 300_000
     admission_wait_ms: int = 5_000
-    calibration_alpha: float = 0.2
-    calibration_min_ratio: float = 0.25
-    calibration_max_ratio: float = 4.0
     tool_profiles_path: Path | None = None
     auth_token: str | None = None
-    trace_path: Path | None = None
+    trace_dir: Path | None = None
     resource_poll_interval_ms: int = 50
     resource_timeline_max_points: int = 2_000
     llm_proxy_enabled: bool = True
@@ -32,19 +28,15 @@ class SchedulerConfig:
     def from_env(cls) -> "SchedulerConfig":
         env_base = load_env_file()
         profile = os.getenv("AGENT_SCHEDULER_TOOL_PROFILES")
-        trace = os.getenv("AGENT_SCHEDULER_TRACE_PATH")
+        trace = os.getenv("AGENT_SCHEDULER_TRACE_DIR")
         return cls(
-            db_path=_path_from_env("AGENT_SCHEDULER_DB_PATH", "scheduler.sqlite3", env_base),
             policy=os.getenv("AGENT_SCHEDULER_POLICY", "observe-only"),
             max_global_concurrency=int(os.getenv("AGENT_SCHEDULER_MAX_GLOBAL_CONCURRENCY", "4")),
             lease_ttl_ms=int(os.getenv("AGENT_SCHEDULER_LEASE_TTL_MS", "300000")),
             admission_wait_ms=int(os.getenv("AGENT_SCHEDULER_ADMISSION_WAIT_MS", "5000")),
-            calibration_alpha=float(os.getenv("AGENT_SCHEDULER_CALIBRATION_ALPHA", "0.2")),
-            calibration_min_ratio=float(os.getenv("AGENT_SCHEDULER_CALIBRATION_MIN_RATIO", "0.25")),
-            calibration_max_ratio=float(os.getenv("AGENT_SCHEDULER_CALIBRATION_MAX_RATIO", "4.0")),
             tool_profiles_path=_resolve_path(profile, env_base) if profile else None,
             auth_token=os.getenv("AGENT_SCHEDULER_TOKEN"),
-            trace_path=_resolve_path(trace, env_base) if trace else None,
+            trace_dir=_resolve_path(trace, env_base) if trace else None,
             resource_poll_interval_ms=int(os.getenv("AGENT_SCHEDULER_RESOURCE_POLL_INTERVAL_MS", "50")),
             resource_timeline_max_points=int(os.getenv("AGENT_SCHEDULER_RESOURCE_TIMELINE_MAX_POINTS", "2000")),
             llm_proxy_enabled=os.getenv("AGENT_SCHEDULER_LLM_PROXY_ENABLED", "true").lower()

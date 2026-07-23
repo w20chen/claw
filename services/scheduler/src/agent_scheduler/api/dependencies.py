@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from agent_scheduler.admission.leases import LeaseManager
-from agent_scheduler.calibration.ewma import EWMACalibrator
 from agent_scheduler.config import SchedulerConfig
 from agent_scheduler.executions import ExecutionRegistry
 from agent_scheduler.monitoring.tool_runtime import RealtimeToolMonitor
@@ -11,7 +10,6 @@ from agent_scheduler.policies.base import SchedulingPolicy
 from agent_scheduler.policies.concurrency import ConcurrencyPolicy
 from agent_scheduler.policies.observe import ObserveOnlyPolicy
 from agent_scheduler.predictors.static_profile import StaticProfilePredictor
-from agent_scheduler.storage.sqlite import SQLiteStore
 from agent_scheduler.telemetry.metrics import Metrics
 from agent_scheduler.topology.linux import read_topology
 from agent_scheduler.trace import AgentTestBenchTraceWriter
@@ -20,11 +18,9 @@ from agent_scheduler.trace import AgentTestBenchTraceWriter
 @dataclass
 class AppState:
     config: SchedulerConfig
-    store: SQLiteStore
     predictor: StaticProfilePredictor
     leases: LeaseManager
     policy: SchedulingPolicy
-    calibrator: EWMACalibrator
     tool_monitor: RealtimeToolMonitor
     executions: ExecutionRegistry
     metrics: Metrics
@@ -34,8 +30,6 @@ class AppState:
 
 def build_state(config: SchedulerConfig | None = None) -> AppState:
     cfg = config or SchedulerConfig.from_env()
-    store = SQLiteStore(cfg.db_path)
-    store.initialize()
     leases = LeaseManager(cfg.max_global_concurrency, cfg.lease_ttl_ms)
     predictor = StaticProfilePredictor.from_path(cfg.tool_profiles_path)
     policy: SchedulingPolicy
@@ -45,11 +39,9 @@ def build_state(config: SchedulerConfig | None = None) -> AppState:
         policy = ObserveOnlyPolicy()
     return AppState(
         config=cfg,
-        store=store,
         predictor=predictor,
         leases=leases,
         policy=policy,
-        calibrator=EWMACalibrator(store, cfg),
         tool_monitor=RealtimeToolMonitor(
             poll_interval_s=max(0.01, cfg.resource_poll_interval_ms / 1000),
             max_timeline_points=max(1, cfg.resource_timeline_max_points),
@@ -57,5 +49,5 @@ def build_state(config: SchedulerConfig | None = None) -> AppState:
         executions=ExecutionRegistry(),
         metrics=Metrics(),
         topology=read_topology(),
-        trace_writer=AgentTestBenchTraceWriter(cfg.trace_path) if cfg.trace_path else None,
+        trace_writer=AgentTestBenchTraceWriter(cfg.trace_dir) if cfg.trace_dir else None,
     )
