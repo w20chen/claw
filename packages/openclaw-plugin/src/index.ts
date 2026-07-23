@@ -171,22 +171,17 @@ export default definePluginEntry({
     debugDumped.add(hookName);
     const evtKeys = isRecord(event) ? Object.keys(event as Record<string, unknown>) : [];
     const ctxKeys = isRecord(context) ? Object.keys(context as Record<string, unknown>) : [];
-    logger.warn(`[trace debug] ${hookName} hook shape`, {
-      hook: hookName,
-      event_keys: evtKeys,
-      event_run_id: extractString(event, ["run_id", "runId"]),
-      event_session_id: extractString(event, ["session_id", "sessionId"]),
-      event_agent_id: extractString(event, ["agent_id", "agentId"]),
-      event_tool_call_id: extractString(event, ["tool_call_id", "toolCallId", "id"]),
-      event_tool_name: extractString(event, ["tool_name", "toolName", "name"]),
-      event_call_id: extractString(event, ["call_id", "callId", "id"]),
-      event_model: extractString(event, ["model"]),
-      context_keys: ctxKeys,
-      context_runId: extractString(context, ["runId", "run_id"]),
-      context_sessionId: extractString(context, ["sessionId", "session_id"]),
-      context_agentId: extractString(context, ["agentId", "agent_id"]),
-      instanceId_fallback: instanceId,
-    });
+    const runId = extractString(event, ["run_id", "runId"]) ?? extractString(context, ["runId", "run_id"]);
+    const sessionId = extractString(event, ["session_id", "sessionId"]) ?? extractString(context, ["sessionId", "session_id"]);
+    const agentId = extractString(event, ["agent_id", "agentId"]) ?? extractString(context, ["agentId", "agent_id"]);
+    // Inline key fields in the message because OpenClaw's logger
+    // only renders the message string, not the structured data.
+    logger.warn(
+      `[trace debug] ${hookName} | ` +
+      `run_id=${runId ?? "-"} session_id=${sessionId ?? "-"} agent_id=${agentId ?? "-"} | ` +
+      `event_keys=[${evtKeys.join(",")}] context_keys=[${ctxKeys.join(",")}] | ` +
+      `fallback_instanceId=${instanceId}`
+    );
   }
 
   // ── before_tool_call ──────────────────────────────────────────────
