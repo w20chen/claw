@@ -479,12 +479,29 @@ def _load_tasks(args: argparse.Namespace, repo_root: Path) -> list[TaskDef]:
 
     # Simple JSON task list
     if args.tasks:
+        path = _resolve_path(args.tasks, repo_root)
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Tasks file not found: {path}\n"
+                f"Generate one with:\n"
+                f"  python -m swe_rebench.discover --out {path}"
+            )
         from swe_rebench.task_source import load_tasks_from_simple_list
-        return load_tasks_from_simple_list(_resolve_path(args.tasks, repo_root))
+        return load_tasks_from_simple_list(path)
 
     # Swe-bench dataset
     if args.dataset:
-        return load_tasks_from_swebench_dataset(_resolve_path(args.dataset, repo_root))
+        path = _resolve_path(args.dataset, repo_root)
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Dataset file not found: {path}\n"
+                f"Generate one with:\n"
+                f"  python -m swe_rebench.discover --out {path}\n"
+                f"  python -m swe_rebench.discover --sample 10 --out {path}\n"
+                f"Or use --image for a single task:\n"
+                f"  python -m swe_rebench.runner run --image <docker-image> --task-id <id> --problem \"...\""
+            )
+        return load_tasks_from_swebench_dataset(path)
 
     return []
 
