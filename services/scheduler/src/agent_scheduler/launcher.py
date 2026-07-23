@@ -221,7 +221,8 @@ def _prepare_cgroup(
         return explicit
     root = os.environ.get("CLAW_CGROUP_ROOT")
     if not root:
-        if not required and os.environ.get("CLAW_ENABLE_CGROUP") != "1":
+        # Default cgroup on.  Set CLAW_ENABLE_CGROUP=0 to opt out.
+        if not required and os.environ.get("CLAW_ENABLE_CGROUP", "1") != "1":
             return None
         root = "/sys/fs/cgroup/claw"
     try:

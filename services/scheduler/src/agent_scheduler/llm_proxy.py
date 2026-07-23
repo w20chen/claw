@@ -249,12 +249,36 @@ def _parse_sse_chunk(chunk: bytes) -> list[dict[str, Any] | None]:
 
 
 def _content_from_response(response_payload: Any | None) -> Any | None:
+    """Extract the meaningful output from an LLM API response.
+
+    Returns the text content when present, the tool_calls when the response
+    is a tool-call-only turn (content is null/empty), or the full message
+    dict as a fallback.
+    """
+    message = _message_from_response(response_payload)
+    if not isinstance(message, dict):
+        return None
+    content = message.get("content")
+    # If there is real text content, return it.
+    if content:
+        return content
+    # For tool-call-only turns the meaningful output is the tool calls.
+    tool_calls = message.get("tool_calls")
+    if tool_calls:
+        return {"tool_calls": tool_calls}
+    # Return content even when empty/falsy (preserves the empty string
+    # for callers that need to distinguish "no text" from "no response").
+    return content
+
+
+def _message_from_response(response_payload: Any | None) -> dict[str, Any] | None:
+    """Extract the assistant message dict from an LLM API response."""
     if response_payload is None:
         return None
     if isinstance(response_payload, dict) and "message" in response_payload:
-        message = response_payload.get("message")
-        if isinstance(message, dict):
-            return message.get("content")
+        msg = response_payload.get("message")
+        if isinstance(msg, dict):
+            return msg
     if not isinstance(response_payload, dict):
         return None
     choices = response_payload.get("choices")
@@ -263,14 +287,25 @@ def _content_from_response(response_payload: Any | None) -> Any | None:
     first = choices[0]
     if not isinstance(first, dict):
         return None
-    message = first.get("message")
-    if isinstance(message, dict):
-        return message.get("content")
-    return first.get("text")
+    msg = first.get("message")
+    if isinstance(msg, dict):
+        return msg
+    text = first.get("text")
+    if isinstance(text, str):
+        return {"content": text}
+    return None
 
 
-def _content_from_stream_chunks(chunks: list[dict[str, Any]]) -> str:
-    return str(_message_from_stream_chunks(chunks).get("content") or "")
+def _content_from_stream_chunks(chunks: list[dict[str, Any]]) -> Any:
+    """Extract meaningful output from streamed LLM response chunks."""
+    message = _message_from_stream_chunks(chunks)
+    content = message.get("content")
+    if content:
+        return content
+    tool_calls = message.get("tool_calls")
+    if tool_calls:
+        return {"tool_calls": tool_calls}
+    return content
 
 
 def _message_from_stream_chunks(chunks: list[dict[str, Any]]) -> dict[str, Any]:

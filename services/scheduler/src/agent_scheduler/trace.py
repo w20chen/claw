@@ -442,7 +442,9 @@ def _agent_id_from_session_key(value: str | None) -> str | None:
 
 def _first_present(*values: Any) -> Any | None:
     for value in values:
-        if value is not None:
+        # Skip None and empty strings — the proxy captures "" for
+        # tool-call-only LLM turns where the API returns content:"".
+        if value is not None and value != "":
             return value
     return None
 
