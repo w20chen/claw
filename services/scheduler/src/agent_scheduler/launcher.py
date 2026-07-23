@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import signal
+import stat
 import subprocess
 import sys
 import urllib.error
@@ -259,17 +260,80 @@ def _cgroup_root_candidates() -> list[str]:
     """Return candidate cgroup root paths in priority order.
 
     Priority:
-      1. /sys/fs/cgroup/claw                  — root or pre-delegated
-      2. /sys/fs/cgroup/user.slice/.../claw   — systemd user slice (non-root)
+      1. /sys/fs/cgroup/claw                               — root or pre-delegated
+      2. /sys/fs/cgroup/user.slice/.../user@<UID>.service/claw
+                                                            — systemd user manager
+                                                              (writable by non-root)
+
+    Only candidates whose parent directory already exists and is writable are
+    returned.  If the user manager directory is missing (e.g. SSH without PAM),
+    we try to start it via D-Bus activation before giving up.
     """
-    candidates = ["/sys/fs/cgroup/claw"]
+    candidates: list[str] = []
+
+    # Priority 1: traditional delegated root.
+    if _try_candidate_parent("/sys/fs/cgroup/claw"):
+        candidates.append("/sys/fs/cgroup/claw")
+
+    # Priority 2: systemd user manager slice.
     try:
         uid = os.getuid()
-        if uid > 0:
-            candidates.append(f"/sys/fs/cgroup/user.slice/user-{uid}.slice/claw")
     except (AttributeError, OSError):
-        pass
+        uid = -1
+    if uid > 0:
+        user_svc = f"/sys/fs/cgroup/user.slice/user-{uid}.slice/user@{uid}.service"
+        if _try_candidate_parent(user_svc):
+            candidates.append(f"{user_svc}/claw")
+        else:
+            # User manager might not be running (SSH without PAM, cron, CI).
+            # Try D-Bus activation — `systemctl --user` is idempotent and
+            # safe to call even when the manager is already active.
+            _start_user_manager()
+            if _try_candidate_parent(user_svc):
+                candidates.append(f"{user_svc}/claw")
+
     return candidates
+
+
+def _try_candidate_parent(parent_path: str) -> bool:
+    """Return True if *parent_path* exists and is writable.
+
+    We only need the parent to be writable so _create_cgroup_at can mkdir
+    into it.  The per-execution subdirectory is created on demand.
+    """
+    try:
+        st = os.stat(parent_path)
+        if not stat.S_ISDIR(st.st_mode):
+            return False
+        return os.access(parent_path, os.W_OK)
+    except OSError:
+        return False
+
+
+def _start_user_manager() -> None:
+    """Attempt to start systemd --user via D-Bus activation.
+
+    Does not raise on failure — if the user manager cannot be started
+    (no systemd, no D-Bus, etc.), cgroup monitoring falls back to PID.
+    """
+    try:
+        subprocess.run(
+            ["systemctl", "--user", "is-active", "--quiet", "user@$(id -u).service"],
+            capture_output=True,
+            timeout=10,
+            shell=False,  # explicit — the $(id -u) is expanded by the next form
+        )
+    except Exception:
+        pass
+    # The command above is safe but the subshell form is more portable:
+    try:
+        subprocess.run(
+            ["systemctl", "--user", "status"],
+            capture_output=True,
+            timeout=10,
+        )
+    except Exception:
+        pass
 
 
 def _create_cgroup_at(

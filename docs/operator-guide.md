@@ -300,12 +300,14 @@ attribution than PID process-tree sampling alone.
 |----------|------|------------|
 | 1 (env) | `CLAW_CGROUP_ROOT` | Explicitly configured |
 | 2 | `/sys/fs/cgroup/claw` | Root process or pre-delegated by admin |
-| 3 | `/sys/fs/cgroup/user.slice/user-<UID>.slice/claw` | systemd, non-root user (default) |
+| 3 | `/sys/fs/cgroup/user.slice/user-<UID>.slice/user@<UID>.service/claw` | systemd, non-root user (default) |
 
 On any modern Linux distribution with systemd (Ubuntu 20.04+, Debian 11+,
-Fedora, Arch, etc.), the **user slice fallback (priority 3) works out of the
-box** — no root privileges required.  The user slice is automatically delegated
-by systemd at login and is writable by the owning user.
+Fedora, Arch, etc.), the **user manager slice fallback (priority 3) works out
+of the box** — no root privileges required.  systemd delegates
+`user@<UID>.service` to the user at login; the parent `user-<UID>.slice` is
+root-owned, so the cgroup must be created under `user@<UID>.service`, not
+directly under the slice.
 
 ### Verify cgroup Is Active
 

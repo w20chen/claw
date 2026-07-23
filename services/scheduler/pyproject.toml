@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "agent-scheduler"
 version = "0.1.0"
 description = "Hardware-aware scheduler sidecar for OpenClaw"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
   "fastapi>=0.110",
   "httpx>=0.27",
