@@ -60,56 +60,99 @@ def discover_from_agent_test_bench(
 
 
 def _load_from_huggingface(sample: int = 0) -> list[dict[str, Any]]:
-    """Load tasks directly from HuggingFace datasets via a subprocess.
+    """Load tasks from HuggingFace parquet files via subprocess.
 
-    Uses a subprocess to avoid in-process import conflicts with the
-    ``datasets`` package (which pulls in heavy deps like pyarrow, pandas).
+    Uses ``huggingface_hub`` + ``pyarrow`` to read the raw parquet files
+    directly — avoids the ``datasets`` library entirely because its 3.x
+    release has breaking schema changes (List→LargeList, type mismatches)
+    that prevent loading older-format datasets like SWE-rebench.
     """
     code = f'''
-import json, sys
+import json, sys, os
+
+# ── Step 1: List parquet files for the requested split ──────────
 try:
-    from datasets import load_dataset
-except ImportError as e:
-    print(json.dumps({{"error": f"Cannot import datasets: {{e}}. Install: pip install datasets"}}))
+    from huggingface_hub import list_repo_files, hf_hub_download
+except ImportError:
+    print(json.dumps({{"error": "huggingface_hub not installed. Run: pip install huggingface_hub"}}))
     sys.exit(1)
 
-# datasets>=3.0 renamed 'List' -> 'LargeList', breaking older datasets.
-# Register 'List' as an alias so old-format datasets (like SWE-rebench) load.
-try:
-    import datasets.features.features as _f
-    if "List" not in _f._FEATURE_TYPES and "LargeList" in _f._FEATURE_TYPES:
-        _f._FEATURE_TYPES["List"] = _f._FEATURE_TYPES["LargeList"]
-except Exception:
-    pass
+repo = "{HF_DATASET}"
+split = "{HF_SPLIT}"
 
-ds = load_dataset("{HF_DATASET}", split="{HF_SPLIT}")
+try:
+    files = list(list_repo_files(repo, repo_type="dataset"))
+except Exception as e:
+    print(json.dumps({{"error": f"Failed to list repo files: {{e}}"}}))
+    sys.exit(1)
+
+# Find parquet files: data/<split>-*.parquet
+parquet_files = sorted(
+    f for f in files
+    if f.startswith(f"data/{{split}}-") and f.endswith(".parquet")
+)
+if not parquet_files:
+    print(json.dumps({{"error": f"No parquet files found for split '{{split}}' in {{repo}}. Files: {{files[:20]}}"}}))
+    sys.exit(1)
+
+# ── Step 2: Download and read parquet files ──────────────────────
+try:
+    import pyarrow.parquet as pq
+except ImportError:
+    print(json.dumps({{"error": "pyarrow not installed. Run: pip install pyarrow"}}))
+    sys.exit(1)
+
+sample_limit = {sample}
 tasks = []
-for i, row in enumerate(ds):
-    if {sample} > 0 and i >= {sample}:
+for pf in parquet_files:
+    if sample_limit > 0 and len(tasks) >= sample_limit:
         break
-    task = dict(row)
-    tasks.append({{
-        "instance_id": str(task.get("instance_id", "")),
-        "image": str(task.get("docker_image", "")),
-        "problem_statement": str(task.get("problem_statement", "")),
-        "repo": str(task.get("repo", "")),
-        "base_commit": str(task.get("base_commit", "")),
-        "FAIL_TO_PASS": task.get("FAIL_TO_PASS", []),
-        "PASS_TO_PASS": task.get("PASS_TO_PASS", []),
-    }})
+    local_path = hf_hub_download(repo, pf, repo_type="dataset")
+    table = pq.read_table(local_path)
+    for batch in table.to_batches(max_chunksize=1000):
+        rows = batch.to_pylist()
+        for row in rows:
+            if sample_limit > 0 and len(tasks) >= sample_limit:
+                break
+            # Normalize: convert numpy/pyarrow types to plain Python
+            task = {{}}
+            for k, v in row.items():
+                if v is None:
+                    task[k] = None
+                elif hasattr(v, 'tolist'):
+                    task[k] = v.tolist()
+                elif hasattr(v, 'item'):
+                    task[k] = v.item()
+                else:
+                    task[k] = v
+            tasks.append({{
+                "instance_id": str(task.get("instance_id", "")),
+                "image": str(task.get("docker_image", "")),
+                "problem_statement": str(task.get("problem_statement", "")),
+                "repo": str(task.get("repo", "")),
+                "base_commit": str(task.get("base_commit", "")),
+                "FAIL_TO_PASS": task.get("FAIL_TO_PASS", []),
+                "PASS_TO_PASS": task.get("PASS_TO_PASS", []),
+            }})
+        if sample_limit > 0 and len(tasks) >= sample_limit:
+            break
+
+if not tasks:
+    print(json.dumps({{"error": f"No tasks loaded from {{len(parquet_files)}} parquet file(s)"}}))
+    sys.exit(1)
+
 print(json.dumps(tasks, ensure_ascii=False))
 '''
-    _log(f"Downloading {HF_DATASET} (split={HF_SPLIT}) via subprocess...")
+    _log(f"Loading {HF_DATASET} (split={HF_SPLIT}) from parquet...")
     result = subprocess.run(
         [sys.executable, "-c", code],
         capture_output=True,
         text=True,
-        timeout=300,
+        timeout=600,
     )
     if result.returncode != 0:
         stderr = result.stderr.strip()
         stdout = result.stdout.strip()
-        # Try to extract a JSON error message
         try:
             err_data = json.loads(stdout)
             msg = err_data.get("error", stdout or stderr)
@@ -129,7 +172,7 @@ print(json.dumps(tasks, ensure_ascii=False))
         if isinstance(raw, dict):
             tasks.append(raw)
 
-    _log(f"Downloaded {len(tasks)} tasks from HuggingFace")
+    _log(f"Loaded {len(tasks)} tasks from {HF_DATASET}")
     return tasks
 
 
