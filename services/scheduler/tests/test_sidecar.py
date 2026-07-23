@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -317,7 +318,7 @@ def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Pa
     assert model_records[0]["data"]["content"] == "done"
 
 
-def test_trace_metadata_is_recreated_if_trace_file_is_deleted(tmp_path: Path, monkeypatch) -> None:
+def test_proxy_capture_without_model_hook_does_not_write_standalone_trace(tmp_path: Path, monkeypatch) -> None:
     client, trace_path = _trace_proxy_client(tmp_path)
     trace_path.unlink()
 
@@ -358,9 +359,7 @@ def test_trace_metadata_is_recreated_if_trace_file_is_deleted(tmp_path: Path, mo
     )
 
     assert response.status_code == 200
-    records = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
-    assert records[0]["type"] == "trace_metadata"
-    assert records[1]["action_type"] == "llm_call"
+    assert not trace_path.exists()
 
 
 def test_llm_proxy_records_full_request_and_response(tmp_path: Path, monkeypatch) -> None:
@@ -410,14 +409,92 @@ def test_llm_proxy_records_full_request_and_response(tmp_path: Path, monkeypatch
     assert response.json()["choices"][0]["message"]["content"] == "world"
     records = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
     llm_records = [record for record in records if record.get("action_type") == "llm_call"]
+    assert llm_records == []
+
+
+def test_model_hook_record_is_enriched_from_proxy_capture(tmp_path: Path, monkeypatch) -> None:
+    client, trace_path = _trace_proxy_client(tmp_path)
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def post(self, url, headers=None, content=None):
+            return httpx.Response(
+                200,
+                json={
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion",
+                    "model": "test-model",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "world"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+
+    monkeypatch.setattr("agent_scheduler.llm_proxy.httpx.AsyncClient", FakeAsyncClient)
+
+    assert client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "hello"}],
+        },
+    ).status_code == 200
+
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    started = {
+        "schema_version": "scheduler.v1",
+        "event_id": "evt-model-start-proxy",
+        "occurred_at": now,
+        "plugin_version": "0.1.0",
+        "run_id": "run-proxy",
+        "session_id": "session-proxy",
+        "session_key": "agent:main:main",
+        "agent_id": None,
+        "event_type": "model_call_started",
+        "call_id": "run-proxy:model:1",
+        "provider": "vllm",
+        "model": "test-model",
+        "duration_ms": None,
+        "outcome": None,
+        "context_token_budget": 8192,
+        "raw_input": None,
+        "raw_output": None,
+        "raw_event": {"runId": "run-proxy", "sessionId": "session-proxy"},
+    }
+    ended = started | {
+        "event_id": "evt-model-end-proxy",
+        "occurred_at": now,
+        "event_type": "model_call_ended",
+        "duration_ms": 2000,
+        "outcome": "completed",
+        "raw_event": {"runId": "run-proxy", "sessionId": "session-proxy"},
+    }
+    assert client.post("/v1/events/model", json=started).json() == {"stored": True}
+    assert client.post("/v1/events/model", json=ended).json() == {"stored": True}
+
+    records = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+    llm_records = [record for record in records if record.get("action_type") == "llm_call"]
     assert len(llm_records) == 1
-    data = llm_records[0]["data"]
-    assert data["provider"] == "llm-proxy"
-    assert data["model"] == "test-model"
-    assert data["messages_in"] == [{"role": "user", "content": "hello"}]
-    assert data["content"] == "world"
-    assert data["raw_request"]["messages"][0]["content"] == "hello"
-    assert data["raw_response"]["choices"][0]["message"]["content"] == "world"
+    record = llm_records[0]
+    assert record["run_id"] == "run-proxy"
+    assert record["session_id"] == "session-proxy"
+    assert record["session_key"] == "agent:main:main"
+    assert record["agent_id"] == "main"
+    assert record["data"]["messages_in"] == [{"role": "user", "content": "hello"}]
+    assert record["data"]["content"] == "world"
+    assert record["data"]["raw_response"]["choices"][0]["message"]["content"] == "world"
 
 
 def test_llm_proxy_reconstructs_streaming_tool_calls(tmp_path: Path, monkeypatch) -> None:
@@ -496,14 +573,7 @@ def test_llm_proxy_reconstructs_streaming_tool_calls(tmp_path: Path, monkeypatch
 
     assert response.status_code == 200
     records = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
-    data = [record for record in records if record.get("action_type") == "llm_call"][0]["data"]
-    assert data["content"] == ""
-    message = data["raw_response"]["message"]
-    assert message["finish_reason"] == "tool_calls"
-    assert message["tool_calls"][0]["id"] == "call-1"
-    assert message["tool_calls"][0]["function"]["name"] == "exec"
-    assert message["tool_calls"][0]["function"]["arguments"] == '{"command":"python --version"}'
-    assert "stream_chunks" not in data["raw_response"]
+    assert [record for record in records if record.get("action_type") == "llm_call"] == []
 
 
 def test_execution_registration_round_trip(tmp_path: Path) -> None:

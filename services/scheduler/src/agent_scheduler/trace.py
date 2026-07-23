@@ -148,7 +148,6 @@ class AgentTestBenchTraceWriter:
             },
         }
         self._remember_proxy_call(record)
-        self._append(record)
 
     def _append(self, record: dict[str, Any]) -> None:
         line = json.dumps(record, sort_keys=True, separators=(",", ":"))
