@@ -18,6 +18,7 @@ class AgentTestBenchTraceWriter:
         self._lock = threading.Lock()
         self._model_starts: dict[str, ModelEvent] = {}
         self._tool_starts: dict[str, ToolBeforeRequest] = {}
+        self._recent_proxy_calls: list[dict[str, Any]] = []
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not self.path.exists() or self.path.stat().st_size == 0:
             self._append(self._metadata_record())
@@ -34,7 +35,10 @@ class AgentTestBenchTraceWriter:
                 "type": "action",
                 "action_type": "tool_exec",
                 "action_id": event.tool_call_id or event.event_id,
-                "agent_id": event.agent_id,
+                "run_id": event.run_id,
+                "session_id": event.session_id,
+                "session_key": event.session_key,
+                "agent_id": event.agent_id or _agent_id_from_session_key(event.session_key),
                 "ts_start": ts_start,
                 "ts_end": ts_end,
                 "data": {
@@ -57,22 +61,30 @@ class AgentTestBenchTraceWriter:
             self._model_starts[key] = event
             return
         start = self._model_starts.pop(key, None)
+        proxy_call = self._pop_recent_proxy_call(event)
         ts_end = _parse_timestamp(event.occurred_at)
         duration_s = (event.duration_ms or 0) / 1000
         ts_start = _parse_timestamp(start.occurred_at) if start is not None else ts_end - duration_s
+        proxy_data = proxy_call.get("data", {}) if isinstance(proxy_call, dict) else {}
         self._append(
             {
                 "type": "action",
                 "action_type": "llm_call",
                 "action_id": event.call_id or event.event_id,
-                "agent_id": event.agent_id,
+                "run_id": event.run_id,
+                "session_id": event.session_id,
+                "session_key": event.session_key,
+                "agent_id": event.agent_id or _agent_id_from_session_key(event.session_key),
                 "ts_start": ts_start,
                 "ts_end": ts_end,
                 "data": {
                     "provider": event.provider,
                     "model": event.model,
-                    "messages_in": None if start is None else start.raw_input,
-                    "content": event.raw_output,
+                    "messages_in": _first_present(
+                        None if start is None else start.raw_input,
+                        proxy_data.get("messages_in"),
+                    ),
+                    "content": _first_present(event.raw_output, proxy_data.get("content")),
                     "duration_ms": event.duration_ms,
                     "llm_latency_ms": (
                         float(event.duration_ms) if event.duration_ms is not None else None
@@ -81,6 +93,9 @@ class AgentTestBenchTraceWriter:
                     "context_token_budget": event.context_token_budget,
                     "openclaw_started_event": None if start is None else start.raw_event,
                     "openclaw_ended_event": event.raw_event,
+                    "raw_request": proxy_data.get("raw_request"),
+                    "raw_response": proxy_data.get("raw_response"),
+                    "proxy": proxy_data.get("proxy"),
                 },
             }
         )
@@ -102,35 +117,38 @@ class AgentTestBenchTraceWriter:
         error: str | None = None,
     ) -> None:
         duration_ms = max(0.0, (ts_end - ts_start) * 1000)
-        self._append(
-            {
-                "type": "action",
-                "action_type": "llm_call",
-                "action_id": action_id or f"llm-proxy-{uuid4()}",
-                "agent_id": None,
-                "ts_start": ts_start,
-                "ts_end": ts_end,
-                "data": {
-                    "provider": provider,
-                    "model": model,
-                    "messages_in": messages_in,
-                    "content": content,
-                    "duration_ms": int(duration_ms),
-                    "llm_latency_ms": duration_ms,
-                    "outcome": "error" if error else "completed",
-                    "context_token_budget": None,
-                    "proxy": {
-                        "status_code": status_code,
-                        "stream": stream,
-                        "error": error,
-                    },
-                    "openclaw_started_event": None,
-                    "openclaw_ended_event": None,
-                    "raw_request": raw_request,
-                    "raw_response": raw_response,
+        record = {
+            "type": "action",
+            "action_type": "llm_call",
+            "action_id": action_id or f"llm-proxy-{uuid4()}",
+            "run_id": None,
+            "session_id": None,
+            "session_key": None,
+            "agent_id": None,
+            "ts_start": ts_start,
+            "ts_end": ts_end,
+            "data": {
+                "provider": provider,
+                "model": model,
+                "messages_in": messages_in,
+                "content": content,
+                "duration_ms": int(duration_ms),
+                "llm_latency_ms": duration_ms,
+                "outcome": "error" if error else "completed",
+                "context_token_budget": None,
+                "proxy": {
+                    "status_code": status_code,
+                    "stream": stream,
+                    "error": error,
                 },
-            }
-        )
+                "openclaw_started_event": None,
+                "openclaw_ended_event": None,
+                "raw_request": raw_request,
+                "raw_response": raw_response,
+            },
+        }
+        self._remember_proxy_call(record)
+        self._append(record)
 
     def _append(self, record: dict[str, Any]) -> None:
         line = json.dumps(record, sort_keys=True, separators=(",", ":"))
@@ -169,6 +187,31 @@ class AgentTestBenchTraceWriter:
         self._tool_starts.pop(key, None)
         return value
 
+    def _remember_proxy_call(self, record: dict[str, Any]) -> None:
+        self._recent_proxy_calls.append(record)
+        if len(self._recent_proxy_calls) > 32:
+            del self._recent_proxy_calls[:-32]
+
+    def _pop_recent_proxy_call(self, event: ModelEvent) -> dict[str, Any] | None:
+        event_ts = _parse_timestamp(event.occurred_at)
+        candidates: list[tuple[int, dict[str, Any]]] = []
+        for index, record in enumerate(self._recent_proxy_calls):
+            data = record.get("data") if isinstance(record.get("data"), dict) else {}
+            if event.model is not None and data.get("model") != event.model:
+                continue
+            ts_end = record.get("ts_end")
+            try:
+                delta = abs(event_ts - float(ts_end))
+            except (TypeError, ValueError):
+                continue
+            if delta <= 10:
+                candidates.append((index, record))
+        if not candidates:
+            return None
+        index, record = candidates[-1]
+        self._recent_proxy_calls.pop(index)
+        return record
+
 
 def _parse_timestamp(value: str) -> float:
     try:
@@ -190,6 +233,22 @@ def _tool_timestamps(sample: ToolRuntimeSample, duration_ms: int) -> tuple[float
 
 def _tool_key(tool_call_id: str | None, event_id: str) -> str:
     return tool_call_id or event_id
+
+
+def _agent_id_from_session_key(value: str | None) -> str | None:
+    if value is None:
+        return None
+    parts = value.split(":")
+    if len(parts) >= 2 and parts[0] == "agent" and parts[1]:
+        return parts[1]
+    return None
+
+
+def _first_present(*values: Any) -> Any | None:
+    for value in values:
+        if value is not None:
+            return value
+    return None
 
 
 def _resource_usage(sample: ToolRuntimeSample) -> dict[str, Any]:
