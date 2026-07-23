@@ -186,7 +186,9 @@ curl http://127.0.0.1:8765/health/live
 curl http://127.0.0.1:8765/health/ready
 ```
 
-Configure OpenClaw's local OpenAI-compatible provider to use the sidecar proxy:
+Configure OpenClaw's local OpenAI-compatible provider to use the sidecar proxy.
+The sidecar **automatically normalises** `/v1/models` responses so OpenClaw
+provider discovery always passes:
 
 ```bash
 export DEEPSEEK_API_KEY='<your-deepseek-api-key>'
@@ -198,10 +200,11 @@ openclaw onboard --non-interactive \
   --custom-model-id 'deepseek-v4-flash'
 ```
 
-For OpenAI-compatible providers, the sidecar exposes `/v1/models` and
-`/v1/chat/completions`, forwards requests to
-`AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL`, and records the full request/response
-into `trace.jsonl`.
+The sidecar exposes `/v1/models` (auto-normalised) and `/v1/chat/completions`,
+forwards requests to `AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL`, and records the
+full request/response into `trace.jsonl`.  For alternative upstreams like
+OpenRouter, set `AGENT_SCHEDULER_LLM_PROXY_EXPOSE_MODEL` and
+`AGENT_SCHEDULER_LLM_PROXY_UPSTREAM_MODEL` to translate model names.
 
 ## 5. Confirm Persistent Plugin Config
 

@@ -95,8 +95,10 @@ openclaw onboard --non-interactive \
   --custom-model-id 'deepseek-v4-flash'
 ```
 
-DeepSeek's upstream URL is the built-in sidecar default. If OpenClaw sends a
-placeholder or local-provider key that DeepSeek will not accept, set
+The sidecar **automatically normalises** `/v1/models` responses so OpenClaw
+provider discovery always passes — no extra config needed.  DeepSeek's
+upstream URL is the built-in sidecar default. If OpenClaw sends a placeholder
+or local-provider key that DeepSeek will not accept, set
 `AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY` in `.env` and restart the sidecar; that
 sidecar key overrides OpenClaw's forwarded `Authorization` header.
 
@@ -171,11 +173,17 @@ Sidecar:
 - `.env`: default sidecar config file, loaded automatically from the repo root
   or from `AGENT_SCHEDULER_ENV_FILE`.
 - `AGENT_SCHEDULER_DB_PATH`: SQLite path.
-- `AGENT_SCHEDULER_TRACE_PATH`: optional live `trace.jsonl` output.
+- `AGENT_SCHEDULER_TRACE_DIR`: optional directory for live `trace.jsonl` output.
 - `AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL`: optional real OpenAI-compatible
   provider base URL used by the LLM proxy. Defaults to DeepSeek.
 - `AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY`: optional upstream provider API key
   override. Leave unset when OpenClaw already sends `Authorization`.
+- `AGENT_SCHEDULER_LLM_PROXY_EXPOSE_MODEL`: optional model ID returned by
+  `/v1/models` (synthetic response).  When unset, the sidecar proxies and
+  auto-normalises the upstream response — no config needed.
+- `AGENT_SCHEDULER_LLM_PROXY_UPSTREAM_MODEL`: optional real upstream model
+  name for translation.  Only needed when the exposed model name differs
+  from the upstream model (e.g. OpenRouter `deepseek/deepseek-chat`).
 - `AGENT_SCHEDULER_POLICY`: `observe-only` or `concurrency`.
 - `AGENT_SCHEDULER_TOOL_PROFILES`: optional scheduler profile JSON.
 
@@ -189,6 +197,34 @@ Plugin:
 - `recordRawTrace`: defaults to `true`; records visible OpenClaw tool hook
   args/results into `trace.jsonl`.
 
+## SWE-Rebench Batch Integration
+
+The `swe_rebench/` package runs swe-rebench benchmark tasks inside Docker
+containers with full OpenClaw + sidecar trace collection. Each task produces an
+independent `trace.jsonl`.
+
+```bash
+# 1. Configure
+cp swe_rebench/config.example.yaml swe_rebench/config.yaml
+# Edit: set llm.api_key and model
+
+# 2. Prepare bundle (one-time)
+python -m swe_rebench.runner prepare --config swe_rebench/config.yaml
+
+# 3. Run a single task
+python -m swe_rebench.runner run --config swe_rebench/config.yaml \
+  --image swebrebench/sweb.eval.x86_64.spectree-64:latest \
+  --task-id test-001 \
+  --problem "Fix the bug in utils.py..."
+
+# 4. Batch run from dataset
+python -m swe_rebench.runner run --config swe_rebench/config.yaml \
+  --prepare --dataset ./swe-bench.json --sample 10 --parallelism 4 --export
+```
+
+Supports DeepSeek, OpenRouter, and any OpenAI-compatible upstream.
+See [swe_rebench/README.md](swe_rebench/README.md) for full docs.
+
 ## Docs
 
 - [Operator guide](docs/operator-guide.md): concise install/run/observe flow.
@@ -196,8 +232,10 @@ Plugin:
   validation commands.
 - [Architecture](docs/architecture.md): component boundaries.
 - [Protocol](docs/protocol.md): scheduler event and execution protocol.
-- [Sidecar](docs/sidecar.md): sidecar endpoints and runtime samples.
+- [Sidecar](docs/sidecar.md): sidecar endpoints, LLM proxy, and runtime samples.
 - [OpenClaw plugin](docs/openclaw-plugin.md): hook and `exec` behavior.
+- [SWE-Rebench](swe_rebench/README.md): batch benchmark integration.
+- [Deployment](docs/deployment.md): build, Docker Compose, and swe-rebench setup.
 - [agent-test-bench integration](docs/integration-agent-test-bench.md):
   offline trace import and benchmark adapter.
 

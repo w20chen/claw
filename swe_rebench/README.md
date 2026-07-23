@@ -27,6 +27,62 @@ python -m swe_rebench.runner run \
 python -m swe_rebench.runner collect --config swe_rebench/config.yaml
 ```
 
+## Configuration
+
+Copy and edit the example config:
+
+```bash
+cp swe_rebench/config.example.yaml swe_rebench/config.yaml
+```
+
+Minimal config (`swe_rebench/config.yaml`):
+
+```yaml
+llm:
+  api_key: "${LLM_API_KEY}"          # or set LLM_API_KEY in env
+  upstream_base_url: "https://api.deepseek.com"
+  model: "deepseek-v4-flash"
+  openclaw_model_ref: "vllm/deepseek-v4-flash"
+
+docker:
+  host: "unix:///var/run/docker.sock"
+  memory_limit: "8g"
+  cpus: 4
+
+batch:
+  parallelism: 4
+  task_timeout_seconds: 1800
+
+output:
+  trace_root: "./swe_rebench/traces"
+  flat_export_dir: "./swe_rebench/export"
+```
+
+### OpenRouter
+
+```yaml
+llm:
+  api_key: "sk-or-v1-xxxxxxxx"
+  upstream_base_url: "https://openrouter.ai/api/v1"
+  model: "deepseek/deepseek-chat"           # OpenRouter model ID
+  openclaw_model_ref: "vllm/deepseek-chat"  # clean name for OpenClaw
+```
+
+The sidecar automatically normalises `/v1/models` responses and translates
+model names so OpenClaw never sees the `provider/model` slash format.
+
+## Discovering Tasks
+
+From HuggingFace parquet datasets:
+
+```bash
+# Sample N tasks
+python -m swe_rebench.discover --sample 10 --out ./swe-bench.json
+
+# All tasks for a specific repo
+python -m swe_rebench.discover --repo django/django --out ./django-tasks.json
+```
+
 ## Batch Run
 
 ```bash

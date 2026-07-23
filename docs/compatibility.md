@@ -7,7 +7,7 @@ The supported operator path assumes Linux with:
 - Python 3.12
 - Node.js 24 and npm
 - OpenClaw 2026.7.1 as the validated baseline
-- Docker or Podman only when running `agent-test-bench` benchmarks
+- Docker or Podman when running `agent-test-bench` benchmarks or swe_rebench batch runs
 
 Install the validated OpenClaw CLI version:
 
@@ -85,29 +85,35 @@ openclaw models status
 
 Provider API names are not guaranteed to be valid OpenClaw model IDs.
 
-### DeepSeek
+### DeepSeek (via sidecar vLLM proxy)
 
-DeepSeek support requires OpenClaw's provider plugin:
+This project routes ALL LLM traffic through the sidecar proxy for trace capture.
+The recommended path uses OpenClaw's `vllm` provider pointed at the sidecar,
+not the native `deepseek` provider.  The sidecar then forwards to DeepSeek
+(or any OpenAI-compatible upstream) and records full request/response content.
 
 ```bash
-openclaw plugins install @openclaw/deepseek-provider
-openclaw gateway restart
-openclaw onboard --auth-choice deepseek-api-key
-openclaw models list --provider deepseek
+export DEEPSEEK_API_KEY='<your-deepseek-api-key>'
+openclaw onboard --non-interactive \
+  --mode local --auth-choice vllm \
+  --custom-base-url 'http://127.0.0.1:8765/v1' \
+  --custom-api-key "$DEEPSEEK_API_KEY" \
+  --custom-model-id 'deepseek-v4-flash'
+openclaw models list --provider vllm
 ```
 
-The documented DeepSeek provider ID is `deepseek`, the auth environment
-variable is `DEEPSEEK_API_KEY`, and the provider uses an OpenAI-compatible API
-at `https://api.deepseek.com`. If Gateway runs as a daemon, the key must be
-available to the daemon process, for example through `~/.openclaw/.env`.
-
-Reference: https://docs.openclaw.ai/providers/deepseek
+The sidecar auto-normalises `/v1/models` responses so provider discovery
+succeeds regardless of upstream metadata format.
 
 ### vLLM
 
 Local vLLM support uses OpenClaw's `vllm` provider and an OpenAI-compatible
 HTTP API. The default base URL is `http://127.0.0.1:8000/v1`; it must expose
 `/v1/models` and `/v1/chat/completions`.
+
+When using the sidecar proxy (recommended for trace capture), point the vLLM
+provider at `http://127.0.0.1:8765/v1` and set the upstream to your real
+vLLM server via `AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL`.
 
 ```bash
 export VLLM_API_KEY='vllm-local'

@@ -13,9 +13,12 @@ full run sequence, use [operator-guide.md](operator-guide.md).
 | Tool completions | Supported | Idempotent SQLite persistence. |
 | Model events | Supported | Stored and optionally written to trace. |
 | Runtime samples | Supported | CPU avg, RSS peak, disk/network throughput, context switches when scoped. |
-| Live `trace.jsonl` | Supported | Enable with `AGENT_SCHEDULER_TRACE_PATH`. |
+| Live `trace.jsonl` | Supported | Enable with `AGENT_SCHEDULER_TRACE_DIR`. Schema v6 (span-based). |
 | CLI trace visualization | Supported | Use `tools/inspect_trace.py` for timeline/detail views. |
-| agent-test-bench format | Supported | v5-shaped records; full LLM content uses proxy, raw tool content requires `recordRawTrace=true`. |
+| agent-test-bench format | Supported | v5-shaped action records and v6 span-based records; full LLM content uses proxy, raw tool content requires `recordRawTrace=true`. |
+| LLM proxy model spoofing | Supported | Auto-normalises `/v1/models` by default; `EXPOSE_MODEL`/`UPSTREAM_MODEL` for translation. |
+| OpenRouter support | Supported | Set `upstream_base_url` + model name translation via env vars. |
+| swe_rebench batch runner | Supported | Independent `swe_rebench/` package; per-task trace collection in Docker. |
 | Plugin hooks | Supported | `before_tool_call`, `after_tool_call`, model start/end. |
 | `exec` hook-only | Supported | No param rewrite. |
 | `exec` marker mode | Supported | Adds correlation env vars. |
@@ -49,7 +52,7 @@ Sidecar and demo:
 
 ```bash
 cd services/scheduler
-PYTHONPATH=src AGENT_SCHEDULER_TRACE_PATH=../../data/trace.jsonl \
+PYTHONPATH=src AGENT_SCHEDULER_TRACE_DIR=../../data/traces \
   python3 -m agent_scheduler.main --host 127.0.0.1 --port 8765
 ```
 
@@ -59,9 +62,9 @@ In another shell:
 python3 tools/demo_supported_features.py --run-launcher
 curl http://127.0.0.1:8765/v1/tools/recent
 curl http://127.0.0.1:8765/metrics
-tail -n 20 data/trace.jsonl
-python3 tools/inspect_trace.py data/trace.jsonl --tail 20 --details
-python3 tools/inspect_trace.py data/trace.jsonl --type tool_exec --tail 10 --details --timeline
+tail -n 20 data/traces/trace.jsonl
+python3 tools/inspect_trace.py data/traces/trace.jsonl --tail 20 --details
+python3 tools/inspect_trace.py data/traces/trace.jsonl --type tool_exec --tail 10 --details --timeline
 ```
 
 Plugin:

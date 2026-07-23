@@ -193,8 +193,8 @@ Useful metrics:
 - `scheduler_tool_net_tx_bytes_per_second`
 - `scheduler_tool_context_switches_total`
 
-Set `AGENT_SCHEDULER_TRACE_PATH` to append live agent-test-bench v5-shaped
-`trace.jsonl` records. Full model input/output is populated when OpenClaw uses
+Set `AGENT_SCHEDULER_TRACE_DIR` to write live trace records
+to `<dir>/trace.jsonl`. Full model input/output is populated when OpenClaw uses
 the LLM proxy. Tool args/results are populated when the plugin sends raw fields
 with `recordRawTrace=true`; otherwise they are `null`.
 

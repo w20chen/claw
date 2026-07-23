@@ -42,3 +42,22 @@ per-tool network accounting is future cgroup/eBPF collector work.
 profiles consumed by this repository, and this sidecar can now emit compatible
 v5-shaped live traces, but the runtime sidecar does not import its agent
 scaffold or benchmark runner.
+
+## SWE-Rebench Batch Runner
+
+`swe_rebench/` is an independent batch runner that wraps the full stack inside
+swe-rebench Docker containers.  It assembles a self-contained runtime bundle
+(plugin + scheduler + scripts), volume-mounts it into each container, and
+orchestrates parallel task execution with per-task trace collection.
+
+Components:
+
+- `runner.py` — CLI orchestrator (`prepare` / `run` / `collect` / `cleanup`).
+- `prepare.py` — bundle assembler (entrypoint, setup, config).
+- `docker.py` — Docker SDK container lifecycle.
+- `task_source.py` — multi-format task loading (JSON, JSONL, swe-bench datasets).
+- `discover.py` — HuggingFace parquet dataset discovery.
+- `config.py` — YAML + environment variable configuration.
+
+Isolation constraint: does not modify `packages/openclaw-plugin/`,
+`services/scheduler/`, or OpenClaw core.

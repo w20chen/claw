@@ -30,7 +30,7 @@ def main() -> None:
 
     print("\n== recent runtime sample ==")
     print_json(get_json(args.endpoint, "/v1/tools/recent?limit=1"))
-    print("\nTrace file is written by the sidecar path in AGENT_SCHEDULER_TRACE_PATH.")
+    print("\nTrace file is written by the sidecar in AGENT_SCHEDULER_TRACE_DIR.")
 
 
 def emit_model_turn(endpoint: str, run_id: str, agent_id: str) -> None:

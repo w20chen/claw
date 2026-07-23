@@ -41,15 +41,16 @@ not in this working plan.
   - best-effort network rx/tx bytes and average throughput
   - context switches
   - compact per-tool resource timeline
-- Optional `AGENT_SCHEDULER_TRACE_PATH` live trace writer.
+- Optional `AGENT_SCHEDULER_TRACE_DIR` live trace writer.
 - CLI trace visualization with `tools/inspect_trace.py`.
 - OpenAI-compatible LLM proxy for full request/response capture:
   - `/v1/models`
   - `/v1/chat/completions`
   - streaming response reconstruction
+  - automatic `/v1/models` normalisation (always-on, no config needed)
   - model name spoofing (`AGENT_SCHEDULER_LLM_PROXY_EXPOSE_MODEL` /
-    `AGENT_SCHEDULER_LLM_PROXY_UPSTREAM_MODEL`) for OpenClaw provider
-    compatibility
+    `AGENT_SCHEDULER_LLM_PROXY_UPSTREAM_MODEL`) for cross-provider
+    model name translation (e.g. OpenRouter)
 - Optional plugin `recordRawTrace=true` capture of hook-visible tool
   args/results and raw hook payloads.
 - Offline `agent-test-bench` trace importer and benchmark adapter.
@@ -76,8 +77,8 @@ trace collection.
 
 - **Isolation**: Does not modify `packages/openclaw-plugin/`, `services/scheduler/`,
   or OpenClaw core.  All code lives under `swe_rebench/`.
-- **Bundle**: `python -m swe_rebench.runner prepare` assembles a runtime bundle
-  that gets volume-mounted into each container at `/claw`.
+- **Bundle**: `python -m swe_rebench.runner prepare --config config.yaml` assembles
+  a runtime bundle that gets volume-mounted into each container at `/claw`.
 - **Per-task traces**: Each task writes `trace.jsonl` to a dedicated directory
   under `swe_rebench/traces/<task_id>/`.
 - **Flat export**: `--export` copies all traces to `swe_rebench/export/` keyed
@@ -85,7 +86,11 @@ trace collection.
 - **Sub-commands**: `prepare`, `run`, `collect`, `cleanup`.
 - **Task sources**: swe-bench JSON/JSONL datasets, simple JSON lists, or
   single-task CLI (`--image` + `--task-id` + `--problem`).
+- **HuggingFace discovery**: `python -m swe_rebench.discover --sample N --out file.json`
 - **Config**: `swe_rebench/config.example.yaml` (copy and edit as `config.yaml`).
+- **OpenRouter support**: Set `upstream_base_url`, `model`, and `openclaw_model_ref`
+  in config.  Sidecar auto-normalises `/v1/models` and translates model names.
+- **CLI ergonomics**: `--config` accepted both before and after the subcommand.
 
 Files:
 - `swe_rebench/runner.py` — main CLI orchestrator
