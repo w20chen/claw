@@ -159,9 +159,8 @@ if [ "$READY" -eq 0 ]; then
 fi
 
 echo "[claw] === Phase 3: configure OpenClaw ==="
-# Save openclaw help so we can debug command discovery
-openclaw --help 2>&1 > "$TRACE_DIR/openclaw-help.txt" || true
-openclaw --version 2>&1 >> "$TRACE_DIR/openclaw-help.txt" || true
+# vLLM provider requires VLLM_API_KEY (any value works).
+export VLLM_API_KEY="${LLM_API_KEY:-sk-test}"
 
 openclaw onboard --non-interactive \
     --mode local --auth-choice vllm \
