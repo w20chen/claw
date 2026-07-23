@@ -793,10 +793,11 @@ function common(event: unknown): CommonEvent {
   };
 }
 
-function buildToolBefore(event: unknown, _config: PluginConfig): ToolBeforeRequest {
+function buildToolBefore(event: unknown, config: PluginConfig): ToolBeforeRequest {
   const params = isRecord(event) ? (event as Record<string, unknown>).params ?? (event as Record<string, unknown>).arguments ?? (event as Record<string, unknown>).input ?? null : null;
   const safeParams = redact(params);
   const toolName = extractString(event, ["tool_name", "toolName", "name"]) ?? "unknown";
+  const includeRaw = config.trace?.include_raw_events === true;
   return {
     ...common(event),
     tool_call_id: extractString(event, ["tool_call_id", "toolCallId", "id"]),
@@ -807,7 +808,7 @@ function buildToolBefore(event: unknown, _config: PluginConfig): ToolBeforeReque
     derived_paths: [],
     params_digest: stableDigest(safeParams),
     param_features: paramFeatures(safeParams),
-    raw_params: null,
+    raw_params: jsonSafe(safeParams),
     raw_event: null,
     resource_scope: null
   };
@@ -934,9 +935,13 @@ function mergeContext(payload: CommonEvent, context: unknown): void {
 function buildCompletion(
   event: unknown,
   prior: {decisionId: string | null; leaseId: string | null; executionId: string | null} | null,
-  _config: PluginConfig
+  config: PluginConfig
 ): ToolCompletedEvent {
   const errorType = extractString(event, ["error_type", "errorType"]);
+  const includeOutput = config.trace?.include_tool_outputs !== false; // default true
+  const rawResult = includeOutput && isRecord(event)
+    ? (event as Record<string, unknown>).result ?? (event as Record<string, unknown>).output ?? (event as Record<string, unknown>).response ?? null
+    : null;
   return {
     ...common(event),
     tool_call_id: extractString(event, ["tool_call_id", "toolCallId", "id"]),
@@ -949,7 +954,7 @@ function buildCompletion(
     error_type: errorType,
     error_digest: null,
     result_size_bytes: extractNumber(event, ["result_size_bytes", "resultSizeBytes"]),
-    raw_result: null,
+    raw_result: includeOutput ? jsonSafe(rawResult) : null,
     raw_event: null,
     resource_scope: null
   };

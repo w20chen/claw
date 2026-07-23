@@ -122,7 +122,13 @@ class AgentTestBenchTraceWriter:
 
         status_code = "ok" if event.succeeded else ("error" if event.error_type else "unknown")
 
-        scope = start.resource_scope if start is not None else None
+        # Prefer the completed-event scope (populated by the plugin from the
+        # execution registry after the tool finishes) over the before-event
+        # scope (always null since the tool hasn't started yet).
+        scope = _first_present(
+            event.resource_scope,
+            start.resource_scope if start is not None else None,
+        )
         has_pid = scope is not None and scope.pid is not None
 
         filepath = self._file_for_run(run_id, session_id, agent_id)
@@ -274,7 +280,7 @@ class AgentTestBenchTraceWriter:
             "monotonic_time_ns": mono_end_ns,
             "duration_ns": duration_ns,
             "status": {"code": status_code, "message": None},
-            "output": {"content": event.raw_output},
+            "output": {"content": _first_present(event.raw_output, proxy_data.get("content"))},
             "execution": {"mode": None, "execution_id": None},
             "resources": {
                 "attribution_status": "not_applicable",
