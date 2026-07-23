@@ -24,6 +24,16 @@ class SchedulerConfig:
     llm_proxy_enabled: bool = True
     llm_proxy_upstream_base_url: str | None = None
     llm_proxy_upstream_api_key: str | None = None
+    # Model name spoofing: expose a different model ID to OpenClaw than the
+    # real upstream model.  Useful when OpenClaw's provider (vllm, openai)
+    # validates model names against its own registry and rejects upstream
+    # model IDs it does not recognise.
+    #   expose_model  — model ID returned by sidecar /v1/models (what OpenClaw sees)
+    #   upstream_model — real model ID sent to the upstream LLM API
+    # If expose_model is set, /v1/models returns a synthetic list instead of
+    # proxying; if upstream_model is unset, it defaults to expose_model.
+    llm_proxy_expose_model: str | None = None
+    llm_proxy_upstream_model: str | None = None
 
     @classmethod
     def from_env(cls) -> "SchedulerConfig":
@@ -48,6 +58,8 @@ class SchedulerConfig:
                 DEFAULT_LLM_UPSTREAM_BASE_URL,
             ),
             llm_proxy_upstream_api_key=os.getenv("AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY"),
+            llm_proxy_expose_model=os.getenv("AGENT_SCHEDULER_LLM_PROXY_EXPOSE_MODEL"),
+            llm_proxy_upstream_model=os.getenv("AGENT_SCHEDULER_LLM_PROXY_UPSTREAM_MODEL"),
         )
 
 

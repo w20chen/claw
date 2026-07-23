@@ -47,6 +47,9 @@ not in this working plan.
   - `/v1/models`
   - `/v1/chat/completions`
   - streaming response reconstruction
+  - model name spoofing (`AGENT_SCHEDULER_LLM_PROXY_EXPOSE_MODEL` /
+    `AGENT_SCHEDULER_LLM_PROXY_UPSTREAM_MODEL`) for OpenClaw provider
+    compatibility
 - Optional plugin `recordRawTrace=true` capture of hook-visible tool
   args/results and raw hook payloads.
 - Offline `agent-test-bench` trace importer and benchmark adapter.

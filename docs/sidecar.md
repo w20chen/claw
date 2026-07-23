@@ -89,6 +89,38 @@ using `.env.example`:
 - `data/trace.jsonl`: append-only trace with `trace_metadata`, `llm_call`, and
   `tool_exec` records.
 
+### Model Name Spoofing
+
+OpenClaw's provider discovery (vllm, openai, etc.) fetches `/v1/models` and
+validates the response against its internal provider registry. Upstream model
+metadata (e.g. `owned_by: "deepseek"`) can cause a **provider mismatch** error
+even when the model list is otherwise correct.
+
+**By default, the sidecar automatically normalises the upstream `/v1/models`
+response**: every model entry's `owned_by` is rewritten to `"organization"`,
+which passes all OpenAI-compatible provider checks.  No configuration is
+needed for this — it happens transparently on every request.
+
+For advanced cases where you need to expose a different model name to OpenClaw
+than the real upstream model (e.g. exposing `gpt-4o` while actually calling
+`deepseek-v4-flash`), set:
+
+```bash
+# Model ID that OpenClaw sees in /v1/models.
+AGENT_SCHEDULER_LLM_PROXY_EXPOSE_MODEL=gpt-4o
+
+# Real model ID sent to the upstream API.
+AGENT_SCHEDULER_LLM_PROXY_UPSTREAM_MODEL=deepseek-v4-flash
+```
+
+When `EXPOSE_MODEL` is set, `/v1/models` returns a synthetic single-model list
+(no upstream call).  Chat completion requests with `model=<EXPOSE_MODEL>` are
+rewritten to `model=<UPSTREAM_MODEL>` before forwarding.
+
+When both vars are set to the same value, the proxy returns a clean synthetic
+model list with no name translation — useful when the upstream `/models`
+endpoint is unreachable or returns a format the normaliser cannot parse.
+
 ## Real-time Tool Monitoring
 
 When the plugin calls `POST /v1/decisions/tool` and the sidecar allows the tool,

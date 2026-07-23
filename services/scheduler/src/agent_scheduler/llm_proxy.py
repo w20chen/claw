@@ -28,12 +28,28 @@ HOP_BY_HOP_HEADERS = {
 
 
 async def proxy_models(request: Request, config: SchedulerConfig) -> Response:
+    # When expose_model is explicitly set, return a synthetic model list
+    # containing only that model ID (useful for model-name translation).
+    if config.llm_proxy_expose_model:
+        return _synthetic_models_response(config.llm_proxy_expose_model)
+
     upstream = _upstream_url(config, request.url.path)
     if upstream is None:
         return _not_configured()
     headers = _forward_headers(request, config)
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.request("GET", upstream, headers=headers, params=request.query_params)
+
+    # Default behaviour: always normalise the upstream /v1/models response
+    # so OpenClaw provider discovery does not reject unfamiliar metadata
+    # (e.g. DeepSeek's "owned_by":"deepseek" causes "provider mismatch").
+    # When normalisation succeeds the response is transparent to callers
+    # except for the sanitised metadata fields.
+    normalized = _normalize_models_response(response.content)
+    if normalized is not None:
+        return JSONResponse(content=normalized, status_code=response.status_code)
+
+    # Fallback: return the raw upstream response as-is.
     return Response(
         content=response.content,
         status_code=response.status_code,
@@ -57,6 +73,11 @@ async def proxy_chat_completions(
     except json.JSONDecodeError:
         payload = {}
 
+    # Translate model name: OpenClaw sends the exposed model ID; the
+    # upstream provider expects the real model ID.
+    _translate_model(payload, config)
+    body = json.dumps(payload).encode("utf-8") if payload else body
+
     stream = bool(payload.get("stream"))
     started_at = time.time()
     action_id = f"llm-proxy-{uuid4()}"
@@ -72,6 +93,7 @@ async def proxy_chat_completions(
                 trace_writer=trace_writer,
                 action_id=action_id,
                 started_at=started_at,
+                config=config,
             ),
             media_type="text/event-stream",
         )
@@ -120,6 +142,7 @@ async def _stream_chat(
     trace_writer: AgentTestBenchTraceWriter | None,
     action_id: str,
     started_at: float,
+    config: SchedulerConfig,
 ):
     chunks: list[dict[str, Any]] = []
     status_code = 200
@@ -204,6 +227,63 @@ def _upstream_url(config: SchedulerConfig, path: str) -> str | None:
     else:
         suffix = path
     return base + suffix
+
+
+def _translate_model(payload: dict[str, Any], config: SchedulerConfig) -> None:
+    """Rewrite the model field from exposed→upstream when model spoofing is active."""
+    expose = config.llm_proxy_expose_model
+    upstream = config.llm_proxy_upstream_model or expose
+    if not expose or not upstream or expose == upstream:
+        return
+    if isinstance(payload.get("model"), str) and payload["model"] == expose:
+        payload["model"] = upstream
+
+
+def _normalize_models_response(raw: bytes) -> dict[str, Any] | None:
+    """Rewrite upstream /v1/models metadata to be OpenClaw-compatible.
+
+    Upstream providers may return model entries with ``owned_by`` values
+    that OpenClaw's provider discovery rejects (e.g. ``"deepseek"`` for
+    the vllm provider).  This function rewrites every model entry's
+    ``owned_by`` to ``"organization"``, which is accepted by all
+    OpenAI-compatible providers.
+
+    Returns the normalised response dict, or ``None`` if the upstream
+    response cannot be parsed as a valid model list.
+    """
+    try:
+        body = json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(body, dict):
+        return None
+    data = body.get("data")
+    if not isinstance(data, list):
+        return None
+    for entry in data:
+        if isinstance(entry, dict) and "owned_by" in entry:
+            entry["owned_by"] = "organization"
+    return body
+
+
+def _synthetic_models_response(model_id: str) -> JSONResponse:
+    """Return an OpenAI-compatible /v1/models response for a single model.
+
+    The response is shaped to satisfy OpenClaw provider discovery
+    (vllm, openai-compatible, etc.) without proxying to the real upstream.
+    """
+    import time as _time
+    return JSONResponse({
+        "object": "list",
+        "data": [
+            {
+                "id": model_id,
+                "object": "model",
+                "created": int(_time.time()),
+                "owned_by": "organization",
+            }
+        ],
+    })
 
 
 def _forward_headers(request: Request, config: SchedulerConfig) -> dict[str, str]:

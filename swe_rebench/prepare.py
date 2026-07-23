@@ -128,6 +128,12 @@ export AGENT_SCHEDULER_TRACE_DIR="$TRACE_DIR"
 export AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL="__UPSTREAM__"
 export AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY="__LLM_KEY__"
 export AGENT_SCHEDULER_LLM_PROXY_ENABLED="true"
+# Model spoofing: the sidecar auto-normalises upstream /v1/models by default.
+# Setting both vars explicitly provides a synthetic fallback for cases where
+# the upstream /models endpoint is unreachable or returns unparseable data.
+# Set UPSTREAM_MODEL to a different value to translate model names.
+export AGENT_SCHEDULER_LLM_PROXY_EXPOSE_MODEL="__MODEL_SHORT__"
+export AGENT_SCHEDULER_LLM_PROXY_UPSTREAM_MODEL="__MODEL_SHORT__"
 export AGENT_SCHEDULER_POLICY="observe-only"
 export AGENT_SCHEDULER_TOOL_PROFILES="$CLAW_ROOT/tool_profiles.json"
 
