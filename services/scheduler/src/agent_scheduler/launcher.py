@@ -29,8 +29,8 @@ def main() -> None:
     if args.command_name == "run":
         try:
             raise SystemExit(run_execution(args.endpoint, args.execution_id, args.token))
-        except Exception as exc:
-            print(f"claw-launch: {exc}", file=sys.stderr)
+        except Exception:
+            print("Command could not be started by the execution environment.", file=sys.stderr)
             raise SystemExit(125) from None
     raise SystemExit(2)
 
@@ -239,7 +239,7 @@ def _prepare_cgroup(
         if _env_enabled("CLAW_CGROUP_REQUIRED"):
             raise RuntimeError(f"cgroup_unavailable root={root}: {exc}") from exc
         if _env_enabled("CLAW_CGROUP_DEBUG"):
-            print(f"claw-launch: cgroup unavailable at {root}: {exc}", file=sys.stderr)
+            print(f"execution environment: cgroup unavailable at {root}: {exc}", file=sys.stderr)
         return None
 
 

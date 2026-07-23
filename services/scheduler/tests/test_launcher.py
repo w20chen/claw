@@ -255,3 +255,30 @@ def test_launcher_accepts_dash_prefixed_token_with_equals(monkeypatch) -> None:
         "execution_id": "exec-1",
         "token": "-leading-token",
     }
+
+
+def test_launcher_main_hides_internal_wrapper_errors(monkeypatch, capsys) -> None:
+    def fail_run(_endpoint: str, _execution_id: str, _token: str) -> int:
+        raise RuntimeError("cgroup_join_failed path=/sys/fs/cgroup/claw token=secret")
+
+    monkeypatch.setattr(launcher, "run_execution", fail_run)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "claw-launch",
+            "run",
+            "--execution-id",
+            "exec-1",
+            "--token=secret",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        launcher.main()
+
+    assert exc.value.code == 125
+    captured = capsys.readouterr()
+    assert "Command could not be started by the execution environment." in captured.err
+    assert "claw-launch" not in captured.err
+    assert "cgroup" not in captured.err
+    assert "secret" not in captured.err

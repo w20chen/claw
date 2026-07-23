@@ -259,6 +259,7 @@ function buildCompletion(
 ): ToolCompletedEvent {
   const errorType = extractString(event, ["error_type", "errorType"]);
   const rawResult = config.recordRawTrace ? jsonSafe(extractToolResult(event)) : null;
+  const rawEvent = config.recordRawTrace ? jsonSafe(sanitizeCompletionRawEvent(event, config)) : null;
   return {
     ...common(event),
     tool_call_id: extractString(event, ["tool_call_id", "toolCallId", "id"]),
@@ -272,9 +273,39 @@ function buildCompletion(
     error_digest: null,
     result_size_bytes: extractNumber(event, ["result_size_bytes", "resultSizeBytes"]),
     raw_result: rawResult,
-    raw_event: config.recordRawTrace ? jsonSafe(event) : null,
+    raw_event: rawEvent,
     resource_scope: null
   };
+}
+
+function sanitizeCompletionRawEvent(event: unknown, config: PluginConfig): unknown {
+  const safe = jsonSafe(event);
+  if (!isRecord(safe)) return safe;
+  const params = safe.params;
+  if (!isRecord(params)) return safe;
+  if (!isManagedWrapperCommand(params.command, config)) return safe;
+  return {
+    ...safe,
+    params: {
+      ...params,
+      command: "<managed execution wrapper redacted>",
+      env: redactManagedWrapperEnv(params.env)
+    }
+  };
+}
+
+function isManagedWrapperCommand(value: unknown, config: PluginConfig): boolean {
+  if (typeof value !== "string") return false;
+  return value.includes("claw-launch") || value.includes(config.launcherPath);
+}
+
+function redactManagedWrapperEnv(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  const output: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    output[key] = key.startsWith("CLAW_") ? "<redacted>" : item;
+  }
+  return output;
 }
 
 async function reportModel(
