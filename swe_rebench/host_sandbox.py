@@ -235,7 +235,7 @@ def _configure_openclaw(
     config: RunnerConfig,
 ) -> None:
     openclaw = _require_executable("openclaw")
-    env = _openclaw_env(openclaw_home, sidecar_port, config)
+    env = _openclaw_env(openclaw_home, sidecar_port, config, workspace)
     endpoint_host = f"http://127.0.0.1:{sidecar_port}"
     endpoint_sandbox = f"http://host.docker.internal:{sidecar_port}"
     sandbox_config = _openclaw_config(
@@ -296,7 +296,7 @@ def _run_openclaw_agent(
     config: RunnerConfig,
 ) -> int:
     openclaw = _require_executable("openclaw")
-    env = _openclaw_env(openclaw_home, sidecar_port, config)
+    env = _openclaw_env(openclaw_home, sidecar_port, config, workspace)
     env.update(
         {
             "TASK_INSTANCE_ID": task.instance_id,
@@ -315,6 +315,7 @@ def _run_openclaw_agent(
             "openclaw_home": openclaw_home,
             "sidecar_port": sidecar_port,
             "config": config,
+            "workspace": workspace,
             "stop_event": stop_discovery,
         },
         daemon=True,
@@ -359,7 +360,6 @@ def _openclaw_config(
     workspace: Path,
     config: RunnerConfig,
 ) -> str:
-    escaped_workspace = str(workspace.resolve()).replace("\\", "\\\\")
     return json.dumps(
         {
             "agents": {
@@ -371,7 +371,6 @@ def _openclaw_config(
                         "workspaceAccess": "rw",
                         "docker": {
                             "network": "bridge",
-                            "binds": [f"{escaped_workspace}:/workspace:rw"],
                             "extraHosts": ["host.docker.internal:host-gateway"],
                             "dangerouslyAllowExternalBindSources": True,
                         },
@@ -425,13 +424,19 @@ def _openclaw_config(
     )
 
 
-def _openclaw_env(openclaw_home: Path, sidecar_port: int, config: RunnerConfig) -> dict[str, str]:
+def _openclaw_env(
+    openclaw_home: Path,
+    sidecar_port: int,
+    config: RunnerConfig,
+    workspace: Path | None = None,
+) -> dict[str, str]:
     env = os.environ.copy()
     env.update(
         {
             "OPENCLAW_HOME": str(openclaw_home),
             "OPENCLAW_STATE_DIR": str(openclaw_home / ".openclaw"),
             "OPENCLAW_CONFIG_PATH": str(openclaw_home / ".openclaw" / "openclaw.json"),
+            "OPENCLAW_WORKSPACE_DIR": str(workspace if workspace is not None else openclaw_home / ".openclaw" / "workspace"),
             "VLLM_API_KEY": config.llm.api_key or "sk-test",
             "LLM_API_KEY": config.llm.api_key,
             "CLAW_SCHEDULER_ENDPOINT": f"http://host.docker.internal:{sidecar_port}",
@@ -447,13 +452,14 @@ def _discover_sandbox_scope_loop(
     openclaw_home: Path,
     sidecar_port: int,
     config: RunnerConfig,
+    workspace: Path,
     stop_event: threading.Event,
 ) -> None:
     openclaw = shutil.which("openclaw") or shutil.which("openclaw.cmd")
     docker = shutil.which("docker") or shutil.which("docker.cmd")
     if openclaw is None or docker is None:
         return
-    env = _openclaw_env(openclaw_home, sidecar_port, config)
+    env = _openclaw_env(openclaw_home, sidecar_port, config, workspace)
     seen: set[str] = set()
     while not stop_event.is_set():
         try:

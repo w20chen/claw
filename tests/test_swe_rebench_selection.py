@@ -5,7 +5,7 @@ from pathlib import Path
 
 from swe_rebench.config import RunnerConfig
 from swe_rebench.docker import ContainerResult
-from swe_rebench.host_sandbox import _ensure_openclaw_sandbox_image, _openclaw_config
+from swe_rebench.host_sandbox import _ensure_openclaw_sandbox_image, _openclaw_config, _openclaw_env
 from swe_rebench.task_source import TaskDef
 from swe_rebench.prepare import _ENTRYPOINT_TEMPLATE, _PLUGIN_CONFIG, _write_entrypoint
 from swe_rebench.task_source import filter_tasks, parse_instance_ids, tasks_from_records
@@ -387,7 +387,19 @@ def test_host_sandbox_openclaw_config_uses_only_public_top_level_keys(tmp_path: 
     assert set(parsed) == {"agents", "plugins", "env"}
     docker_cfg = parsed["agents"]["defaults"]["sandbox"]["docker"]
     assert docker_cfg["extraHosts"] == ["host.docker.internal:host-gateway"]
-    assert docker_cfg["binds"][0].endswith(":/workspace:rw")
+    assert "binds" not in docker_cfg
+    assert parsed["agents"]["defaults"]["sandbox"]["workspaceAccess"] == "rw"
+
+
+def test_host_sandbox_openclaw_env_points_workspace_dir_at_task_workspace(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("", encoding="utf-8")
+    config = RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
+    workspace = tmp_path / "workspace"
+
+    env = _openclaw_env(tmp_path / "home", 8765, config, workspace)
+
+    assert env["OPENCLAW_WORKSPACE_DIR"] == str(workspace)
 
 
 def test_host_sandbox_builds_default_sandbox_image_when_missing(monkeypatch, tmp_path: Path) -> None:
