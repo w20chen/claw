@@ -6,7 +6,13 @@ from pathlib import Path
 from swe_rebench.config import RunnerConfig
 from swe_rebench.prepare import _ENTRYPOINT_TEMPLATE, _write_entrypoint
 from swe_rebench.task_source import filter_tasks, parse_instance_ids, tasks_from_records
-from swe_rebench.runner import _inspect_trace, _reset_task_trace_dir, _smoke_summary, _task_artifacts
+from swe_rebench.runner import (
+    _inspect_trace,
+    _require_llm_api_key,
+    _reset_task_trace_dir,
+    _smoke_summary,
+    _task_artifacts,
+)
 
 
 def _records() -> list[dict[str, object]]:
@@ -278,6 +284,30 @@ llm:
     config = RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
 
     assert config.llm.api_key == "sk-real-from-env"
+
+
+def test_require_llm_api_key_reports_default_file(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+llm:
+  api_key: "${LLM_API_KEY}"
+""",
+        encoding="utf-8",
+    )
+    config = RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
+
+    try:
+        _require_llm_api_key(config)
+    except SystemExit as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+
+    assert "LLM API key is not configured" in message
+    assert "swe_rebench" in message
+    assert "llm_api_key.txt" in message
 
 
 def test_entrypoint_generation_does_not_embed_api_key(tmp_path: Path) -> None:

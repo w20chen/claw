@@ -427,6 +427,21 @@ def _reset_task_trace_dir(trace_root: Path, trace_dir: Path) -> None:
     target.mkdir(parents=True, exist_ok=True)
 
 
+def _require_llm_api_key(config: RunnerConfig) -> None:
+    if config.llm.api_key:
+        return
+
+    searched = []
+    if config.llm.api_key_file is not None:
+        searched.append(str(config.llm.api_key_file))
+    searched.append(str(config.repo_root / ".env"))
+    raise SystemExit(
+        "ERROR: LLM API key is not configured. "
+        "Set LLM_API_KEY, write the key to swe_rebench/llm_api_key.txt, "
+        f"or set llm.api_key_file. Searched: {', '.join(searched)}"
+    )
+
+
 def _export_traces(config: RunnerConfig, report: BatchReport) -> None:
     """Copy trace files into a flat export directory keyed by task ID."""
     export_dir = config.output.flat_export_dir
@@ -644,6 +659,8 @@ def main() -> None:
                 if t.problem_statement:
                     _log(f"       problem: {t.problem_statement[:120]}...")
             return
+
+        _require_llm_api_key(config)
 
         report = run_batch(config, tasks, bundle_dir, export_after=args.export)
 
