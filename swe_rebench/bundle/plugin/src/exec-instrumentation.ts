@@ -75,8 +75,8 @@ export async function instrumentExecParams(
       profiling: decision.profiling ?? {
         mode: config.profilingMode,
         enable_cgroup: config.enableCgroup,
-        enable_affinity: true,
-        enable_numa: true
+        enable_affinity: config.enableAffinity,
+        enable_numa: config.enableNuma
       },
       backend: config.executionBackend
     });

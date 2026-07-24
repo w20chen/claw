@@ -1,283 +1,188 @@
 # SWE-Rebench Integration
 
-Runs swe-rebench benchmark tasks inside Docker containers with full
-OpenClaw + sidecar trace collection.  Each task produces an independent
-`trace.jsonl` file capturing all LLM calls, tool executions, and
-resource usage.
+The `swe_rebench` package runs SWE-Rebench/SWE-Bench style tasks in Docker
+containers. Each container gets a generated `/claw` runtime bundle containing
+the OpenClaw plugin, scheduler sidecar, setup script, and entrypoint.
+
+Each task writes traces to a dedicated host directory under
+`swe_rebench/traces/<task_id>/`.
+
+## Requirements
+
+- Python 3.10+
+- Docker daemon access
+- Network access from containers
+- A valid OpenAI-compatible LLM API key
 
 ## Quick Start
 
 ```bash
-# 1. Copy and edit config
 cp swe_rebench/config.example.yaml swe_rebench/config.yaml
-# Edit: set llm.api_key to your DeepSeek / OpenAI API key
+# Edit llm.api_key, or use api_key: "${LLM_API_KEY}" and export LLM_API_KEY.
 
-# 2. Prepare the runtime bundle (one-time)
-cd /path/to/claw
 python -m swe_rebench.runner prepare --config swe_rebench/config.yaml
 
-# 3. Run a single task
-python -m swe_rebench.runner run \
-  --config swe_rebench/config.yaml \
+python -m swe_rebench.runner run --config swe_rebench/config.yaml \
   --image swebrebench/sweb.eval.x86_64.django:latest \
-  --task-id django__test \
-  --problem "Fix the XSS vulnerability in the admin view..."
-
-# 4. Collect and export traces
-python -m swe_rebench.runner collect --config swe_rebench/config.yaml
+  --task-id django__example \
+  --problem "Fix the bug described by the benchmark task."
 ```
 
-## Configuration
+The runner exits non-zero if any task fails.
 
-Copy and edit the example config:
+## Configure The LLM Provider
 
-```bash
-cp swe_rebench/config.example.yaml swe_rebench/config.yaml
-```
-
-### Required: LLM Provider
-
-You **must** set `llm.api_key`.  Everything else has sensible defaults.
-
-**DeepSeek (default):**
+Only `llm.api_key` is required for the default DeepSeek path:
 
 ```yaml
 llm:
-  api_key: "sk-xxxxxxxx"                # REQUIRED — your DeepSeek API key
+  api_key: "${LLM_API_KEY}"
   upstream_base_url: "https://api.deepseek.com"
   model: "deepseek-v4-flash"
   openclaw_model_ref: "vllm/deepseek-v4-flash"
 ```
 
-**OpenRouter:**
+OpenRouter example:
 
 ```yaml
 llm:
-  api_key: "sk-or-v1-xxxxxxxx"          # REQUIRED — your OpenRouter API key
+  api_key: "${LLM_API_KEY}"
   upstream_base_url: "https://openrouter.ai/api/v1"
-  model: "deepseek/deepseek-chat"        # OpenRouter model ID (with slash)
-  openclaw_model_ref: "vllm/deepseek-chat"  # clean name for OpenClaw (no slash)
+  model: "deepseek/deepseek-chat"
+  openclaw_model_ref: "vllm/deepseek-chat"
 ```
 
-**Custom OpenAI-compatible endpoint:**
+Custom OpenAI-compatible endpoint:
 
 ```yaml
 llm:
-  api_key: "your-key"
+  api_key: "${LLM_API_KEY}"
   upstream_base_url: "https://your-api.example.com/v1"
-  model: "your-model-name"
-  openclaw_model_ref: "vllm/your-model-name"
+  model: "your-model"
+  openclaw_model_ref: "vllm/your-model"
 ```
 
-The sidecar automatically normalises `/v1/models` responses and translates
-model names.  When `model` contains a `/` (like OpenRouter), the entrypoint
-sets `AGENT_SCHEDULER_LLM_PROXY_UPSTREAM_MODEL` for automatic translation.
+The sidecar normalizes `/v1/models` for OpenClaw. When the upstream model name
+differs from the model OpenClaw should see, the generated entrypoint sets model
+translation variables automatically from the config.
 
-### Configuration Reference
+## Run Tasks
 
-Every section and field.  Values shown are defaults.
-
-#### `llm`
-
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `api_key` | **yes** | — | Upstream provider API key. Supports `${LLM_API_KEY}` env-var expansion. |
-| `upstream_base_url` | no | `https://api.deepseek.com` | OpenAI-compatible base URL the sidecar proxies to. |
-| `model` | no | `deepseek-v4-flash` | Model ID as known to the upstream provider. |
-| `openclaw_model_ref` | no | `vllm/deepseek-v4-flash` | How OpenClaw refers to the model. Format: `vllm/<name>`. |
-
-#### `docker`
-
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `host` | no | `unix:///var/run/docker.sock` | Docker daemon socket. Falls back to `docker` CLI if SDK unavailable. |
-| `memory_limit` | no | `8g` | Per-container memory limit. |
-| `cpus` | no | `4` | Per-container CPU limit. |
-| `network_mode` | no | `bridge` | Docker network mode. Use `host` if containers need host network access. |
-| `dns_servers` | no | `[]` | Extra DNS servers. |
-| `pull_policy` | no | `missing` | Image pull policy: `always`, `missing`, or `never`. |
-| `cap_add` | no | `[]` | Extra Linux capabilities (e.g. `["SYS_PTRACE"]`). |
-
-#### `batch`
-
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `parallelism` | no | `4` | Max concurrent containers. |
-| `task_timeout_seconds` | no | `1800` | Per-task wall-clock timeout. `0` = no timeout. |
-| `retry_failed` | no | `0` | Retry count for failed tasks. |
-| `continue_on_error` | no | `true` | Keep running remaining tasks after a failure. |
-
-#### `output`
-
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `trace_root` | no | `./swe_rebench/traces` | Directory for per-task trace output. |
-| `report_path` | no | `./swe_rebench/report.json` | Batch summary report path. |
-| `flat_export_dir` | no | `./swe_rebench/export` | Flat export directory (set to `""` to disable). |
-
-#### `bundle`
-
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `plugin_source` | no | `packages/openclaw-plugin` | Path to plugin source (copied into bundle). |
-| `scheduler_source` | no | `services/scheduler` | Path to sidecar source (copied into bundle). |
-| `tool_profiles` | no | `examples/tool-profiles.example.json` | Tool profile JSON for the sidecar. |
-| `output_dir` | no | `swe_rebench/bundle` | Where the runtime bundle is assembled. |
-
-#### `agent`
-
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `max_turns` | no | `50` | Max tool-call turns before the agent is stopped. |
-| `extra_args` | no | `[]` | Extra CLI args passed to `openclaw agent`. |
-
-### Environment Variables
-
-The config file supports `${VAR}` expansion.  You can also set the key
-directly in the environment instead of in the file:
+Single task:
 
 ```bash
-export LLM_API_KEY="sk-xxxxxxxx"
-# Then use  api_key: "${LLM_API_KEY}"  in config.yaml
+python -m swe_rebench.runner run --config swe_rebench/config.yaml \
+  --image <docker-image> \
+  --task-id <id> \
+  --problem "<problem statement>"
 ```
 
-## Discovering Tasks
+Simple task list:
 
-From HuggingFace parquet datasets:
-
-```bash
-# Sample N tasks
-python -m swe_rebench.discover --sample 10 --out ./swe-bench.json
-
-# All tasks for a specific repo
-python -m swe_rebench.discover --repo django/django --out ./django-tasks.json
+```json
+[
+  {
+    "instance_id": "django__example",
+    "image": "swebrebench/sweb.eval.x86_64.django:latest",
+    "problem_statement": "Fix the bug..."
+  }
+]
 ```
 
-## Batch Run
+```bash
+python -m swe_rebench.runner run --config swe_rebench/config.yaml \
+  --tasks tasks.json \
+  --parallelism 4 \
+  --export
+```
+
+SWE-Bench/SWE-Rebench dataset:
 
 ```bash
-# From a swe-bench dataset JSON file
-python -m swe_rebench.runner run \
-  --config swe_rebench/config.yaml \
+python -m swe_rebench.runner run --config swe_rebench/config.yaml \
   --prepare \
-  --dataset ./swe-bench.json \
+  --dataset swe-bench.json \
   --sample 10 \
   --parallelism 4 \
   --export
 ```
 
-## Trace Output
+Use `--dry-run` to confirm task loading without starting containers:
 
-Each task writes its trace to `swe_rebench/traces/<task_id>/trace.jsonl`.
-After a run, use `--export` to copy all traces to a flat directory:
-
+```bash
+python -m swe_rebench.runner run --config swe_rebench/config.yaml \
+  --dataset swe-bench.json \
+  --sample 3 \
+  --dry-run
 ```
+
+## Discover Tasks
+
+If the optional discovery dependencies and network access are available:
+
+```bash
+python -m swe_rebench.discover --sample 10 --out swe-bench.json
+python -m swe_rebench.discover --repo django/django --out django-tasks.json
+```
+
+## Outputs
+
+Default paths:
+
+```text
 swe_rebench/
-├── export/                          # Flat export (--export flag)
-│   ├── django__123_trace.jsonl
-│   └── flask__456_trace.jsonl
-├── traces/                          # Per-task raw output
-│   ├── django__123/
-│   │   └── trace.jsonl
-│   └── flask__456/
-│       └── trace.jsonl
-└── report.json                      # Batch summary
+  traces/<task_id>/*.jsonl
+  export/
+  report.json
 ```
 
-Trace format follows the sidecar's standard `trace.jsonl` schema (v5-shaped
-records with `llm_call` and `tool_exec` actions).
+The report contains per-task status, exit code, trace files, trace line count,
+and duration.
 
-## Inspecting Traces
-
-Use the existing trace inspector:
+Export traces after a completed run:
 
 ```bash
-python tools/inspect_trace.py swe_rebench/traces/django__123/trace.jsonl --all --details
-python tools/inspect_trace.py swe_rebench/traces/django__123/trace.jsonl --all --timeline
+python -m swe_rebench.runner collect --config swe_rebench/config.yaml
 ```
 
-## Architecture
-
-```
-Host: swe_rebench/runner.py
-  │
-  ├─ prepare:  Builds /claw bundle (plugin + sidecar + scripts)
-  │
-  └─ run:      For each task:
-       │
-       └─ Container (swe-rebench image)
-            │
-            ├─ /claw/entrypoint.sh
-            │   ├─ setup.sh          (install Node, OpenClaw, Python deps)
-            │   ├─ Start sidecar     (port 8765, captures traces)
-            │   ├─ Configure plugin  (points at 127.0.0.1:8765)
-            │   ├─ openclaw run      (solves the task)
-            │   └─ Stop sidecar      (flush traces)
-            │
-            └─ /traces/trace.jsonl → host volume mount
-```
-
-## Independence
-
-This integration is completely independent:
-- Does **not** modify `packages/openclaw-plugin/`
-- Does **not** modify `services/scheduler/`
-- Does **not** modify OpenClaw core
-- The bundle copies (not modifies) plugin and scheduler source
-- Existing `npm test`, `pytest`, `validate_contracts.py` all continue to pass
-
-## Configuration
-
-See `config.example.yaml` for all options.  Key settings:
-
-| Setting | Description |
-|---------|-------------|
-| `llm.api_key` | Upstream LLM API key (passed to sidecar proxy) |
-| `batch.parallelism` | Max concurrent containers |
-| `batch.task_timeout_seconds` | Per-task timeout |
-| `output.trace_root` | Where per-task traces are written |
-| `output.flat_export_dir` | Flat export directory (set or use `--export`) |
-
-## Requirements
-
-- **Host**: Python 3.10+, Docker daemon running
-- **Container**: Ubuntu/Debian-based swe-rebench images work best
-  (setup.sh auto-detects apt/yum/dnf/apk)
-- **Network**: Container needs internet access (for npm install, API calls)
-
-## Task Definition Format
-
-### Swe-bench Dataset (JSON)
-
-```json
-[
-  {
-    "instance_id": "django__django-12345",
-    "docker_image": "swerebench/sweb.eval.x86_64.django:latest",
-    "problem_statement": "Fix the bug where...",
-    "repo": "django/django",
-    "base_commit": "abc123..."
-  }
-]
-```
-
-### Simple Task List
-
-```json
-[
-  {
-    "instance_id": "my-task",
-    "image": "swerebench/sweb.eval.x86_64.django:latest",
-    "problem_statement": "..."
-  }
-]
-```
-
-### Single Task (CLI)
+Inspect traces:
 
 ```bash
-python -m swe_rebench.runner run \
-  --image <docker-image> \
-  --task-id <id> \
-  --problem "<statement>"
+python tools/inspect_trace.py swe_rebench/traces/<task_id>/<trace-file>.jsonl --all --details
+python tools/inspect_trace.py swe_rebench/traces/<task_id>/<trace-file>.jsonl --all --timeline
 ```
+
+## Main Config Fields
+
+| Field | Default | Purpose |
+| --- | --- | --- |
+| `llm.api_key` | `${LLM_API_KEY}` | Upstream LLM key. |
+| `llm.upstream_base_url` | `https://api.deepseek.com` | OpenAI-compatible upstream URL. |
+| `llm.model` | `deepseek-v4-flash` | Upstream model name. |
+| `llm.openclaw_model_ref` | `vllm/deepseek-v4-flash` | Model name passed to `openclaw agent`. |
+| `docker.memory_limit` | `8g` | Per-container memory limit. |
+| `docker.cpus` | `4` | Per-container CPU limit. |
+| `docker.network_mode` | `bridge` | Docker network mode. |
+| `batch.parallelism` | `4` | Concurrent containers. |
+| `batch.task_timeout_seconds` | `1800` | Per-task timeout. |
+| `output.trace_root` | `./swe_rebench/traces` | Per-task trace root. |
+| `output.flat_export_dir` | `./swe_rebench/export` | Flat trace export destination. |
+
+See `swe_rebench/config.example.yaml` for all fields.
+
+## How It Works
+
+```text
+host runner
+  -> prepare runtime bundle
+  -> start one container per task
+  -> /claw/entrypoint.sh installs runtime dependencies
+  -> sidecar starts on 127.0.0.1:8765 inside the container
+  -> OpenClaw is onboarded to the sidecar LLM proxy
+  -> hardware-scheduler plugin is installed and enabled
+  -> openclaw agent --local runs the task
+  -> traces are written to the mounted /traces directory
+```
+
+The integration copies plugin and sidecar source into the bundle. It does not
+modify OpenClaw core.

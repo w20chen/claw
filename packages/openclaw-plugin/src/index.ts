@@ -150,13 +150,18 @@ export default definePluginEntry({
       decisionTimeoutMs: {type: "integer", default: 800, minimum: 1},
       reportTimeoutMs: {type: "integer", default: 800, minimum: 1},
       failOpen: {type: "boolean", default: true},
+      sendRawParams: {type: "boolean", default: false},
+      recordRawTrace: {type: "boolean", default: false},
       authTokenEnv: {type: "string", default: "OPENCLAW_SCHEDULER_TOKEN"},
       logLevel: {enum: ["error", "warn", "info", "debug"], default: "info"},
       executionBackend: {enum: ["hook-only", "marker", "managed-wrapper"], default: "hook-only"},
       launcherPath: {type: "string", default: "/opt/claw/bin/claw-launch"},
+      collectorSocket: {type: "string", default: "/run/claw/collector.sock"},
       instrumentHosts: {type: "array", items: {type: "string"}, default: ["gateway"]},
       instrumentTools: {type: "array", items: {type: "string"}, default: ["exec"]},
       enableCgroup: {type: "boolean", default: true},
+      enableAffinity: {type: "boolean", default: true},
+      enableNuma: {type: "boolean", default: true},
       profilingMode: {enum: ["off", "proc", "perf", "ksys", "vtune"], default: "off"},
       securityBoundaryAccepted: {type: "boolean", default: false},
       trace: {
@@ -798,6 +803,9 @@ function buildToolBefore(event: unknown, config: PluginConfig): ToolBeforeReques
   const safeParams = redact(params);
   const toolName = extractString(event, ["tool_name", "toolName", "name"]) ?? "unknown";
   const includeRaw = config.trace?.include_raw_events === true;
+  const rawEvent = includeRaw && isRecord(event)
+    ? (config.trace.redact_sensitive_data ? redact(event) : jsonSafe(event))
+    : null;
   return {
     ...common(event),
     tool_call_id: extractString(event, ["tool_call_id", "toolCallId", "id"]),
@@ -809,7 +817,7 @@ function buildToolBefore(event: unknown, config: PluginConfig): ToolBeforeReques
     params_digest: stableDigest(safeParams),
     param_features: paramFeatures(safeParams),
     raw_params: jsonSafe(safeParams),
-    raw_event: null,
+    raw_event: rawEvent,
     resource_scope: null
   };
 }
@@ -939,8 +947,12 @@ function buildCompletion(
 ): ToolCompletedEvent {
   const errorType = extractString(event, ["error_type", "errorType"]);
   const includeOutput = config.trace?.include_tool_outputs !== false; // default true
+  const includeRaw = config.trace?.include_raw_events === true;
   const rawResult = includeOutput && isRecord(event)
     ? (event as Record<string, unknown>).result ?? (event as Record<string, unknown>).output ?? (event as Record<string, unknown>).response ?? null
+    : null;
+  const rawEvent = includeRaw && isRecord(event)
+    ? (config.trace.redact_sensitive_data ? redact(event) : jsonSafe(event))
     : null;
   return {
     ...common(event),
@@ -955,7 +967,7 @@ function buildCompletion(
     error_digest: null,
     result_size_bytes: extractNumber(event, ["result_size_bytes", "resultSizeBytes"]),
     raw_result: includeOutput ? jsonSafe(rawResult) : null,
-    raw_event: null,
+    raw_event: rawEvent,
     resource_scope: null
   };
 }
@@ -965,9 +977,13 @@ async function reportModel(
   logger: {warn(message: string, data?: unknown): void},
   event: unknown,
   eventType: "model_call_started" | "model_call_ended",
-  _config: PluginConfig
+  config: PluginConfig
 ): Promise<void> {
   try {
+    const includeRaw = config.trace?.include_raw_events === true;
+    const rawEvent = includeRaw && isRecord(event)
+      ? (config.trace.redact_sensitive_data ? redact(event) : jsonSafe(event))
+      : null;
     const payload: ModelEvent = {
       ...common(event),
       event_type: eventType,
@@ -977,9 +993,13 @@ async function reportModel(
       duration_ms: extractNumber(event, ["duration_ms", "durationMs"]),
       outcome: extractString(event, ["outcome", "status"]),
       context_token_budget: extractNumber(event, ["context_token_budget", "contextTokenBudget"]),
-      raw_input: null,
-      raw_output: null,
-      raw_event: null
+      raw_input: eventType === "model_call_started" && config.trace.include_llm_messages
+        ? jsonSafe(config.trace.redact_sensitive_data ? sanitizeTraceData(extractModelInput(event)) : extractModelInput(event))
+        : null,
+      raw_output: eventType === "model_call_ended" && config.trace.include_tool_outputs
+        ? jsonSafe(config.trace.redact_sensitive_data ? sanitizeTraceData(extractModelOutput(event)) : extractModelOutput(event))
+        : null,
+      raw_event: rawEvent
     };
     await client.reportModel(payload);
   } catch (error) {

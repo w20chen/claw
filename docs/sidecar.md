@@ -70,11 +70,9 @@ AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY=<your-deepseek-api-key>
 Restart the sidecar after editing `.env`.
 
 The proxy forwards `/v1/models` and `/v1/chat/completions` to the upstream
-provider. Non-streaming and streaming chat completions are recorded as
-`llm_call` actions in `trace.jsonl`, including `messages_in`, reconstructed
-`content`, `raw_request`, and `raw_response`. Streaming responses are stored as
-one reconstructed assistant message; individual SSE chunks are not written to
-the trace.
+provider. Non-streaming and streaming chat completions are recorded as schema
+v6 LLM spans. Streaming responses are stored as one reconstructed assistant
+message; individual SSE chunks are not written to the trace.
 
 When the proxy is working, OpenClaw logs show:
 
@@ -87,8 +85,8 @@ using `.env.example`:
 
 - `data/openclaw-trace.sqlite3`: SQLite persistence for sidecar state,
   decisions, completions, model events, and runtime samples.
-- `data/trace.jsonl`: append-only trace with `trace_metadata`, `llm_call`, and
-  `tool_exec` records.
+- `data/traces/*.jsonl`: append-only span traces with `trace_metadata`,
+  `span_start`, and `span_end` records.
 
 ### Model Name Spoofing
 
@@ -156,8 +154,8 @@ Stored sample fields include:
 - sampling metadata: interval, point count, quality, and timeline truncation
 - cgroup-v2 CPU time, memory, I/O, process count, and context-switch deltas
   when a trusted scope includes `kind: "cgroup-v2"` and `cgroup_path`.
-  cgroup monitoring is **enabled by default** on Linux via the systemd user
-  slice; see [Operator Guide](operator-guide.md#8-cgroup-resource-monitoring-default).
+  cgroup monitoring is enabled by default on Linux when the launcher can create
+  or use a delegated cgroup; see [Operator Guide](operator-guide.md#7-cgroup-notes).
 - best-effort network rx/tx deltas from `/proc/<pid>/net/dev`
 - predicted `resource_class`
 
@@ -194,10 +192,11 @@ Useful metrics:
 - `scheduler_tool_net_tx_bytes_per_second`
 - `scheduler_tool_context_switches_total`
 
-Set `AGENT_SCHEDULER_TRACE_DIR` to write live trace records
-to `<dir>/trace.jsonl`. Full model input/output is populated when OpenClaw uses
-the LLM proxy. Tool args/results are populated when the plugin sends raw fields
-with `recordRawTrace=true`; otherwise they are `null`.
+Set `AGENT_SCHEDULER_TRACE_DIR` to write live trace records to that directory.
+The writer creates one JSONL file per run/session. Full model input/output is
+populated when OpenClaw uses the LLM proxy. Tool args/results are populated
+when the plugin sends raw fields with `recordRawTrace=true`; otherwise they are
+`null`.
 
 ## Managed Execution Registration
 

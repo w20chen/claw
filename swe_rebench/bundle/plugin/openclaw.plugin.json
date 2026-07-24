@@ -18,7 +18,7 @@
       "authTokenEnv": {"type": "string", "default": "OPENCLAW_SCHEDULER_TOKEN"},
       "logLevel": {"enum": ["error", "warn", "info", "debug"], "default": "info"},
       "executionBackend": {"enum": ["hook-only", "marker", "managed-wrapper"], "default": "hook-only"},
-      "launcherPath": {"type": "string", "default": "claw-launch"},
+      "launcherPath": {"type": "string", "default": "/opt/claw/bin/claw-launch"},
       "collectorSocket": {"type": "string", "default": "/run/claw/collector.sock"},
       "instrumentHosts": {"type": "array", "items": {"type": "string"}, "default": ["gateway"]},
       "instrumentTools": {"type": "array", "items": {"type": "string"}, "default": ["exec"]},
@@ -26,7 +26,23 @@
       "enableAffinity": {"type": "boolean", "default": true},
       "enableNuma": {"type": "boolean", "default": true},
       "profilingMode": {"enum": ["off", "proc", "perf", "ksys", "vtune"], "default": "off"},
-      "securityBoundaryAccepted": {"type": "boolean", "default": false}
+      "securityBoundaryAccepted": {"type": "boolean", "default": false},
+      "trace": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {"type": "integer", "default": 6},
+          "include_raw_events": {"type": "boolean", "default": false},
+          "include_llm_messages": {"type": "boolean", "default": true},
+          "include_tool_outputs": {"type": "boolean", "default": true},
+          "redact_sensitive_data": {"type": "boolean", "default": true},
+          "flush_span_start": {"type": "boolean", "default": true},
+          "max_string_bytes": {"type": "integer", "default": 16384},
+          "max_messages_bytes": {"type": "integer", "default": 131072},
+          "max_tool_output_bytes": {"type": "integer", "default": 65536},
+          "trace_dir": {"type": "string", "default": ""}
+        }
+      }
     },
     "additionalProperties": false
   }

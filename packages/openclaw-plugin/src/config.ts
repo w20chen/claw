@@ -6,13 +6,18 @@ const defaults: PluginConfig = {
   decisionTimeoutMs: 800,
   reportTimeoutMs: 800,
   failOpen: true,
+  sendRawParams: false,
+  recordRawTrace: false,
   authTokenEnv: "OPENCLAW_SCHEDULER_TOKEN",
   logLevel: "info",
   executionBackend: "hook-only",
   launcherPath: "/opt/claw/bin/claw-launch",
+  collectorSocket: "/run/claw/collector.sock",
   instrumentHosts: ["gateway"],
   instrumentTools: ["exec"],
   enableCgroup: true,
+  enableAffinity: true,
+  enableNuma: true,
   profilingMode: "off",
   securityBoundaryAccepted: false,
   trace: {
@@ -31,7 +36,21 @@ const defaults: PluginConfig = {
 
 export function loadConfig(input: unknown): PluginConfig {
   const raw = isRecord(input) ? input : {};
-  const config = {...defaults, ...raw, ...envOverrides()};
+  const rawTrace = isRecord(raw.trace) ? raw.trace : {};
+  const legacyTrace = legacyTraceOverrides(raw);
+  const env = envOverrides();
+  const envTrace = isRecord(env.trace) ? env.trace : {};
+  const config = {
+    ...defaults,
+    ...raw,
+    ...env,
+    trace: {
+      ...defaults.trace,
+      ...rawTrace,
+      ...legacyTrace,
+      ...envTrace,
+    },
+  };
   if (config.mode !== "observe" && config.mode !== "enforce") {
     throw new Error(`invalid mode: ${String(config.mode)}`);
   }
@@ -44,6 +63,12 @@ export function loadConfig(input: unknown): PluginConfig {
   if (typeof config.failOpen !== "boolean") {
     throw new Error("failOpen must be a boolean");
   }
+  if (typeof config.sendRawParams !== "boolean") {
+    throw new Error("sendRawParams must be a boolean");
+  }
+  if (typeof config.recordRawTrace !== "boolean") {
+    throw new Error("recordRawTrace must be a boolean");
+  }
   if (!["hook-only", "marker", "managed-wrapper"].includes(String(config.executionBackend))) {
     throw new Error(`invalid executionBackend: ${String(config.executionBackend)}`);
   }
@@ -53,11 +78,23 @@ export function loadConfig(input: unknown): PluginConfig {
   if (typeof config.launcherPath !== "string" || config.launcherPath.length === 0) {
     throw new Error("launcherPath must be a non-empty string");
   }
+  if (typeof config.collectorSocket !== "string" || config.collectorSocket.length === 0) {
+    throw new Error("collectorSocket must be a non-empty string");
+  }
   if (!Array.isArray(config.instrumentHosts) || !config.instrumentHosts.every((item) => typeof item === "string")) {
     throw new Error("instrumentHosts must be an array of strings");
   }
   if (!Array.isArray(config.instrumentTools) || !config.instrumentTools.every((item) => typeof item === "string")) {
     throw new Error("instrumentTools must be an array of strings");
+  }
+  if (typeof config.enableCgroup !== "boolean") {
+    throw new Error("enableCgroup must be a boolean");
+  }
+  if (typeof config.enableAffinity !== "boolean") {
+    throw new Error("enableAffinity must be a boolean");
+  }
+  if (typeof config.enableNuma !== "boolean") {
+    throw new Error("enableNuma must be a boolean");
   }
   if (config.executionBackend === "managed-wrapper" && config.securityBoundaryAccepted !== true) {
     throw new Error("managed-wrapper requires securityBoundaryAccepted=true");
@@ -76,12 +113,45 @@ function envOverrides(): Partial<PluginConfig> {
   setString(output, "launcherPath", process.env.OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH);
   setString(output, "executionBackend", process.env.OPENCLAW_HARDWARE_SCHEDULER_EXECUTION_BACKEND);
   setBoolean(output, "failOpen", process.env.OPENCLAW_HARDWARE_SCHEDULER_FAIL_OPEN);
+  setBoolean(output, "sendRawParams", process.env.OPENCLAW_HARDWARE_SCHEDULER_SEND_RAW_PARAMS);
+  setBoolean(output, "recordRawTrace", process.env.OPENCLAW_HARDWARE_SCHEDULER_RECORD_RAW_TRACE);
   setBoolean(
     output,
     "securityBoundaryAccepted",
     process.env.OPENCLAW_HARDWARE_SCHEDULER_SECURITY_BOUNDARY_ACCEPTED
   );
+  const trace: Record<string, unknown> = {};
+  const traceDir = process.env.OPENCLAW_HARDWARE_SCHEDULER_TRACE_DIR;
+  if (traceDir !== undefined && traceDir.length > 0) trace.trace_dir = traceDir;
+  const recordRaw = parseBoolean(process.env.OPENCLAW_HARDWARE_SCHEDULER_RECORD_RAW_TRACE);
+  if (recordRaw !== null) {
+    trace.include_raw_events = recordRaw;
+    trace.include_llm_messages = recordRaw;
+    trace.include_tool_outputs = recordRaw;
+  }
+  if (Object.keys(trace).length > 0) {
+    (output as Record<string, unknown>).trace = trace;
+  }
   return output;
+}
+
+function legacyTraceOverrides(raw: Record<string, unknown>): Record<string, unknown> {
+  const output: Record<string, unknown> = {};
+  const sendRawParams = booleanValue(raw.sendRawParams);
+  const recordRawTrace = booleanValue(raw.recordRawTrace);
+  if (recordRawTrace === true) {
+    output.include_raw_events = true;
+    output.include_llm_messages = true;
+    output.include_tool_outputs = true;
+  }
+  if (sendRawParams === true) {
+    output.include_tool_outputs = true;
+  }
+  return output;
+}
+
+function booleanValue(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
 }
 
 function setString<K extends keyof PluginConfig>(
@@ -99,7 +169,13 @@ function setBoolean<K extends keyof PluginConfig>(
   key: K,
   value: string | undefined
 ): void {
-  if (value === undefined || value.length === 0) return;
+  const parsed = parseBoolean(value);
+  if (parsed === null) return;
+  (output as Record<string, unknown>)[key] = parsed;
+}
+
+function parseBoolean(value: string | undefined): boolean | null {
+  if (value === undefined || value.length === 0) return null;
   const normalized = value.toLowerCase();
-  (output as Record<string, unknown>)[key] = ["1", "true", "yes", "on"].includes(normalized);
+  return ["1", "true", "yes", "on"].includes(normalized);
 }

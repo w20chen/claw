@@ -13,9 +13,9 @@ full run sequence, use [operator-guide.md](operator-guide.md).
 | Tool completions | Supported | Idempotent SQLite persistence. |
 | Model events | Supported | Stored and optionally written to trace. |
 | Runtime samples | Supported | CPU avg, RSS peak, disk/network throughput, context switches when scoped. |
-| Live `trace.jsonl` | Supported | Enable with `AGENT_SCHEDULER_TRACE_DIR`. Schema v6 (span-based). |
+| Live JSONL traces | Supported | Enable with `AGENT_SCHEDULER_TRACE_DIR`. Schema v6 (span-based). |
 | CLI trace visualization | Supported | Use `tools/inspect_trace.py` for timeline/detail views. |
-| agent-test-bench format | Supported | v5-shaped action records and v6 span-based records; full LLM content uses proxy, raw tool content requires `recordRawTrace=true`. |
+| agent-test-bench-style analysis | Supported | Import/inspection tools consume exported traces; live traces are schema v6. |
 | LLM proxy model spoofing | Supported | Auto-normalises `/v1/models` by default; `EXPOSE_MODEL`/`UPSTREAM_MODEL` for translation. |
 | OpenRouter support | Supported | Set `upstream_base_url` + model name translation via env vars. |
 | swe_rebench batch runner | Supported | Independent `swe_rebench/` package; per-task trace collection in Docker. |
@@ -45,7 +45,7 @@ The sidecar never substitutes its own process metrics for tool metrics.
 Contracts:
 
 ```bash
-python3 tools/validate_contracts.py
+python tools/validate_contracts.py
 ```
 
 Sidecar and demo:
@@ -53,18 +53,18 @@ Sidecar and demo:
 ```bash
 cd services/scheduler
 PYTHONPATH=src AGENT_SCHEDULER_TRACE_DIR=../../data/traces \
-  python3 -m agent_scheduler.main --host 127.0.0.1 --port 8765
+  python -m agent_scheduler.main --host 127.0.0.1 --port 8765
 ```
 
 In another shell:
 
 ```bash
-python3 tools/demo_supported_features.py --run-launcher
+python tools/demo_supported_features.py --run-launcher
 curl http://127.0.0.1:8765/v1/tools/recent
 curl http://127.0.0.1:8765/metrics
-tail -n 20 data/traces/trace.jsonl
-python3 tools/inspect_trace.py data/traces/trace.jsonl --tail 20 --details
-python3 tools/inspect_trace.py data/traces/trace.jsonl --type tool_exec --tail 10 --details --timeline
+ls data/traces
+python tools/inspect_trace.py data/traces/<trace-file>.jsonl --all --details
+python tools/inspect_trace.py data/traces/<trace-file>.jsonl --all --timeline
 ```
 
 Plugin:
@@ -79,21 +79,21 @@ Scheduler tests:
 
 ```bash
 cd services/scheduler
-python3 -m pytest tests -q
+python -m pytest tests -q
 ```
 
 Root tests:
 
 ```bash
-python3 -m pytest tests -q --basetemp .pytest-tmp-root
+python -m pytest tests -q --basetemp .pytest-tmp-root
 ```
 
 ## Expected Trace Shape
 
 ```json
-{"type":"trace_metadata","trace_format_version":5,"scaffold":"openclaw","mode":"collect"}
-{"type":"action","action_type":"llm_call","action_id":"...","data":{"messages_in":[...],"content":"...","llm_latency_ms":1234.0}}
-{"type":"action","action_type":"tool_exec","action_id":"...","data":{"tool_name":"exec","tool_args":{"command":"pytest"},"tool_result":"...","resource_usage":{"attribution_status":"pid"}}}
+{"schema_version":6,"record_type":"trace_metadata","trace_format_version":6,"scaffold":"openclaw","mode":"collect"}
+{"schema_version":6,"record_type":"span_start","kind":"llm","name":"deepseek-v4-flash","input":{"messages":[...]}}
+{"schema_version":6,"record_type":"span_end","kind":"tool","name":"exec","output":{"content":...},"resources":{"attribution_status":"attributed","scope":"process_tree"}}
 ```
 
 The LLM proxy records raw model request/response content. The plugin records

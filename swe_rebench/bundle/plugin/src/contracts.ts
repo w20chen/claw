@@ -23,13 +23,18 @@ export type PluginConfig = {
   decisionTimeoutMs: number;
   reportTimeoutMs: number;
   failOpen: boolean;
+  sendRawParams: boolean;
+  recordRawTrace: boolean;
   authTokenEnv: string;
   logLevel: "error" | "warn" | "info" | "debug";
   executionBackend: ExecutionBackend;
   launcherPath: string;
+  collectorSocket: string;
   instrumentHosts: string[];
   instrumentTools: string[];
   enableCgroup: boolean;
+  enableAffinity: boolean;
+  enableNuma: boolean;
   profilingMode: ProfilingMode;
   securityBoundaryAccepted: boolean;
   trace: TracePluginConfig;

@@ -96,6 +96,30 @@ test("marker backend injects env without changing command", async () => {
   assert.equal(seen[0].command, "pytest tests -q");
 });
 
+test("exec instrumentation forwards configured profiling toggles", async () => {
+  const seen = [];
+  const client = {
+    async registerExecution(request) {
+      seen.push(request);
+      return {one_time_token: "token-1"};
+    }
+  };
+  const event = {toolName: "exec", toolCallId: "call-1", params: {command: "pytest tests -q"}};
+
+  await instrumentExecParams(
+    event,
+    {},
+    payload,
+    decision,
+    client,
+    {...baseConfig, enableCgroup: false, enableAffinity: false, enableNuma: false}
+  );
+
+  assert.equal(seen[0].profiling.enable_cgroup, false);
+  assert.equal(seen[0].profiling.enable_affinity, false);
+  assert.equal(seen[0].profiling.enable_numa, false);
+});
+
 test("exec instrumentation drops shell startup env override keys", async () => {
   const client = {
     async registerExecution() {

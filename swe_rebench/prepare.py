@@ -41,6 +41,18 @@ _PLUGIN_CONFIG: dict[str, Any] = {
     "enableNuma": False,
     "profilingMode": "off",
     "securityBoundaryAccepted": False,
+    "trace": {
+        "schema_version": 6,
+        "include_raw_events": True,
+        "include_llm_messages": True,
+        "include_tool_outputs": True,
+        "redact_sensitive_data": True,
+        "flush_span_start": True,
+        "max_string_bytes": 16384,
+        "max_messages_bytes": 131072,
+        "max_tool_output_bytes": 65536,
+        "trace_dir": "",
+    },
 }
 
 # ── Shared bash snippet: detect correct python/pip for swe-rebench images ──

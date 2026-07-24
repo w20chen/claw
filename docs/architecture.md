@@ -39,9 +39,9 @@ best-effort Linux namespace counter read from `/proc/<pid>/net/dev`; exact
 per-tool network accounting is future cgroup/eBPF collector work.
 
 `agent-test-bench` is deliberately offline-only. It can export traces and
-profiles consumed by this repository, and this sidecar can now emit compatible
-v5-shaped live traces, but the runtime sidecar does not import its agent
-scaffold or benchmark runner.
+profiles consumed by this repository. Runtime traces are schema v6 span
+records; the sidecar does not import the agent-test-bench agent scaffold or
+benchmark runner.
 
 ## SWE-Rebench Batch Runner
 

@@ -26,6 +26,12 @@ export AGENT_SCHEDULER_TRACE_DIR="$TRACE_DIR"
 export AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL="https://api.deepseek.com"
 export AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY=""
 export AGENT_SCHEDULER_LLM_PROXY_ENABLED="true"
+# Model spoofing: the sidecar auto-normalises upstream /v1/models by default.
+# Setting both vars explicitly provides a synthetic fallback for cases where
+# the upstream /models endpoint is unreachable or returns unparseable data.
+# Set UPSTREAM_MODEL to a different value to translate model names.
+export AGENT_SCHEDULER_LLM_PROXY_EXPOSE_MODEL="deepseek-v4-flash"
+export AGENT_SCHEDULER_LLM_PROXY_UPSTREAM_MODEL="deepseek-v4-flash"
 export AGENT_SCHEDULER_POLICY="observe-only"
 export AGENT_SCHEDULER_TOOL_PROFILES="$CLAW_ROOT/tool_profiles.json"
 
@@ -57,28 +63,64 @@ if [ "$READY" -eq 0 ]; then
 fi
 
 echo "[claw] === Phase 3: configure OpenClaw ==="
-openclaw onboard --non-interactive \
+# vLLM provider requires VLLM_API_KEY (any value works).
+export VLLM_API_KEY="${LLM_API_KEY:-sk-test}"
+
+# Save ALL Phase 3 diagnostics to a log file for debugging.
+# Each command handles its own errors so 'set -e' does not abort.
+{
+echo "=== openclaw onboard ==="
+# --skip-health: we use openclaw agent --local, no gateway needed.
+# --accept-risk: required for non-interactive mode.
+openclaw onboard --non-interactive --accept-risk --skip-health \
     --mode local --auth-choice vllm \
     --custom-base-url "http://127.0.0.1:$SIDECAR_PORT/v1" \
     --custom-api-key "" \
-    --custom-model-id "deepseek-v4-flash" 2>/dev/null || true
+    --custom-model-id "deepseek-v4-flash" || echo "onboard FAILED (exit=$?)"
+echo ""
 
-openclaw plugins install --link "$CLAW_ROOT/plugin" 2>/dev/null || true
-openclaw plugins enable hardware-scheduler 2>/dev/null || true
+echo "=== openclaw plugins install ==="
+# Copy plugin to writable location to avoid "suspicious ownership" error
+# from the read-only /claw bind mount (host uid ≠ container root uid).
+cp -r "$CLAW_ROOT/plugin" /tmp/plugin
+openclaw plugins install --link /tmp/plugin || echo "plugin install FAILED (exit=$?)"
+echo "=== openclaw plugins enable ==="
+openclaw plugins enable hardware-scheduler || echo "plugin enable FAILED (exit=$?)"
+echo ""
+
 if [ -f "$CLAW_ROOT/openclaw-config.json5" ]; then
-    openclaw config patch --stdin < "$CLAW_ROOT/openclaw-config.json5" 2>/dev/null || true
+    echo "=== openclaw config patch ==="
+    openclaw config patch --stdin < "$CLAW_ROOT/openclaw-config.json5" || echo "config patch FAILED (exit=$?)"
+    echo ""
 fi
 
-echo "[claw] === Phase 4: run agent (max_turns=50) ==="
+echo "=== openclaw models list ==="
+openclaw models list || echo "models list FAILED (exit=$?)"
+echo ""
+
+echo "=== sidecar /v1/models ==="
+curl -sS "http://127.0.0.1:$SIDECAR_PORT/v1/models" || echo "/v1/models FAILED (exit=$?)"
+echo ""
+
+echo "=== sidecar /health/ready ==="
+curl -sS "http://127.0.0.1:$SIDECAR_PORT/health/ready" || echo "/health/ready FAILED (exit=$?)"
+echo ""
+
+echo "=== Phase 3 done ==="
+} > "$TRACE_DIR/phase3.log" 2>&1 || true
+
+echo "[claw] === Phase 4: run agent ==="
 AGENT_EXIT=0
+openclaw agent --help 2>&1 > "$TRACE_DIR/agent-help.txt" || true
+
 if [ -n "${PROBLEM_STATEMENT:-}" ]; then
     echo "$PROBLEM_STATEMENT" > /tmp/problem_statement.txt
-    openclaw run \
-        --prompt-file /tmp/problem_statement.txt \
+    echo "[claw] running: openclaw agent --local --agent main --model vllm/deepseek-v4-flash ..."
+    openclaw agent --local \
+        --agent main \
         --model "vllm/deepseek-v4-flash" \
-        --max-turns 50 \
-        --allowed-tools "exec,read,write,edit,grep,glob,bash,ls" \
-         || AGENT_EXIT=$?
+        --message-file /tmp/problem_statement.txt \
+        2>"$TRACE_DIR/agent-stderr.txt" || AGENT_EXIT=$?
 else
     echo "[claw] WARNING: PROBLEM_STATEMENT not set"
     bash "$CLAW_ROOT/run_agent.sh" || AGENT_EXIT=$?

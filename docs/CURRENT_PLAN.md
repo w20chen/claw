@@ -119,17 +119,18 @@ Use `npm.cmd` on Windows PowerShell when `npm.ps1` is blocked.
 
 ## Last Known Validation
 
-- Passed: `python3 tools\validate_contracts.py`
-- Passed: `python3 -m pytest tests -q --basetemp .pytest-tmp-root`
-  - 33 passed, 1 xfail (Windows: `cpu_time_s` is None due to missing process sampling).
-- Passed: `cd services/scheduler && python3 -m pytest tests -q`
-  - 33 passed, 1 xfail (same Windows limitation).
-- Passed: `python3 -m py_compile services\scheduler\src\agent_scheduler\llm_proxy.py services\scheduler\src\agent_scheduler\api\app.py services\scheduler\src\agent_scheduler\trace.py services\scheduler\src\agent_scheduler\config.py`
-- Passed: `python3 tools\inspect_trace.py tests\fixtures\agent_test_bench_trace.jsonl --all --details --width 100`
-- Passed: `python3 tools\inspect_trace.py tests\fixtures\agent_test_bench_trace.jsonl --all --details --timeline --width 100`
-- Passed: `cd packages/openclaw-plugin && npm.cmd test`
-  - 33 Node tests passed (2026-07-23, after trace writer key fix + Python sidecar fix).
-- Passed: `cd packages/openclaw-plugin && npm.cmd run typecheck`
+- Passed: `python tools\validate_contracts.py` (2026-07-24)
+- Passed: `python -m pytest tests -q --basetemp .pytest-tmp-root` (2026-07-24)
+  - 3 passed.
+- Passed: `cd services\scheduler && python -m pytest tests -q` (2026-07-24)
+  - 34 passed, 1 warning.
+- Passed: `cd packages\openclaw-plugin && npm.cmd test` (2026-07-24)
+  - 38 Node tests passed.
+- Passed: `cd packages\openclaw-plugin && npm.cmd run typecheck` (2026-07-24)
+- Passed: `python -m py_compile swe_rebench\config.py swe_rebench\docker.py swe_rebench\prepare.py swe_rebench\runner.py swe_rebench\task_source.py` (2026-07-24)
+- Passed: `python -m swe_rebench.runner run --config swe_rebench/config.example.yaml --image example/image:latest --task-id demo --problem "demo" --dry-run` (2026-07-24)
+- Not run: live `python -m swe_rebench.runner run --prepare ...` Docker task execution.
+  - Requires a real swe-rebench task image, container runtime access, and a valid upstream LLM API key/model configuration.
 
 ## Known Environment Notes
 
