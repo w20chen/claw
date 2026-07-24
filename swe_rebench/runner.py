@@ -120,6 +120,8 @@ def _inspect_trace(path: Path, task_id: str) -> dict[str, Any]:
         "has_llm_span": False,
         "tool_span_ends": 0,
         "launcher_tool_span_ends": 0,
+        "launcher_cgroup_tool_span_ends": 0,
+        "launcher_attributed_tool_span_ends": 0,
         "unattributed_launcher_tool_span_ends": 0,
         "cgroup_tool_span_ends": 0,
         "process_tree_tool_span_ends": 0,
@@ -166,7 +168,14 @@ def _inspect_trace(path: Path, task_id: str) -> dict[str, Any]:
                     report["failed_tool_span_ends"] += 1
                 if _nested_get(record, ("execution", "mode")) == "launcher":
                     report["launcher_tool_span_ends"] += 1
-                    if _nested_get(record, ("resources", "attribution_status")) == "unattributed":
+                    if resources.get("scope") == "cgroup":
+                        report["launcher_cgroup_tool_span_ends"] += 1
+                    if resources.get("attribution_status") in {"attributed", "partially_attributed"}:
+                        report["launcher_attributed_tool_span_ends"] += 1
+                    if (
+                        resources.get("scope") not in {"cgroup", "process_tree"}
+                        and resources.get("attribution_status") == "unattributed"
+                    ):
                         report["unattributed_launcher_tool_span_ends"] += 1
         if kind == "llm" or "model" in span_name or record.get("action_type") == "llm_call":
             report["has_llm_span"] = True
@@ -175,11 +184,9 @@ def _inspect_trace(path: Path, task_id: str) -> dict[str, Any]:
         report["warnings"].append("trace does not contain TASK_INSTANCE_ID")
     if not report["has_tool_span"]:
         report["warnings"].append("trace has no tool span/action")
-    if report["launcher_tool_span_ends"] and (
-        report["launcher_tool_span_ends"] == report["unattributed_launcher_tool_span_ends"]
-    ):
+    if report["launcher_tool_span_ends"] and not report["launcher_attributed_tool_span_ends"]:
         report["warnings"].append("launcher tool spans have no resource attribution")
-    if report["launcher_tool_span_ends"] and not report["cgroup_tool_span_ends"]:
+    if report["launcher_tool_span_ends"] and not report["launcher_cgroup_tool_span_ends"]:
         report["warnings"].append("launcher tool spans have no cgroup resource samples")
     if report["failed_tool_span_ends"]:
         report["warnings"].append("tool span status disagrees with non-zero exit code")
@@ -189,6 +196,14 @@ def _inspect_trace(path: Path, task_id: str) -> dict[str, Any]:
 def _resource_summary(trace_inspection: list[dict[str, Any]]) -> dict[str, Any]:
     tool_span_ends = sum(int(item.get("tool_span_ends", 0)) for item in trace_inspection)
     launcher_tool_span_ends = sum(int(item.get("launcher_tool_span_ends", 0)) for item in trace_inspection)
+    launcher_cgroup_tool_span_ends = sum(
+        int(item.get("launcher_cgroup_tool_span_ends", 0))
+        for item in trace_inspection
+    )
+    launcher_attributed_tool_span_ends = sum(
+        int(item.get("launcher_attributed_tool_span_ends", 0))
+        for item in trace_inspection
+    )
     attributed_tool_span_ends = sum(int(item.get("attributed_tool_span_ends", 0)) for item in trace_inspection)
     cgroup_tool_span_ends = sum(int(item.get("cgroup_tool_span_ends", 0)) for item in trace_inspection)
     unattributed_launcher_tool_span_ends = sum(
@@ -198,11 +213,13 @@ def _resource_summary(trace_inspection: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "tool_span_ends": tool_span_ends,
         "launcher_tool_span_ends": launcher_tool_span_ends,
+        "launcher_attributed_tool_span_ends": launcher_attributed_tool_span_ends,
+        "launcher_cgroup_tool_span_ends": launcher_cgroup_tool_span_ends,
         "attributed_tool_span_ends": attributed_tool_span_ends,
         "cgroup_tool_span_ends": cgroup_tool_span_ends,
         "unattributed_launcher_tool_span_ends": unattributed_launcher_tool_span_ends,
         "cgroup_coverage_ratio": (
-            round(cgroup_tool_span_ends / launcher_tool_span_ends, 3)
+            round(launcher_cgroup_tool_span_ends / launcher_tool_span_ends, 3)
             if launcher_tool_span_ends
             else None
         ),

@@ -244,10 +244,56 @@ def test_inspect_trace_summarizes_cgroup_resource_coverage(tmp_path: Path) -> No
     summary = _resource_summary([report])
 
     assert report["cgroup_tool_span_ends"] == 1
+    assert report["launcher_cgroup_tool_span_ends"] == 1
     assert report["attributed_tool_span_ends"] == 1
+    assert report["launcher_attributed_tool_span_ends"] == 1
     assert "launcher tool spans have no cgroup resource samples" not in report["warnings"]
     assert summary["cgroup_tool_span_ends"] == 1
+    assert summary["launcher_cgroup_tool_span_ends"] == 1
     assert summary["cgroup_coverage_ratio"] == 1.0
+
+
+def test_resource_summary_uses_launcher_cgroup_coverage_ratio(tmp_path: Path) -> None:
+    trace_path = tmp_path / "trace.jsonl"
+    trace_path.write_text(
+        json.dumps({"record_type": "trace_metadata", "trace_format_version": 6})
+        + "\n"
+        + json.dumps(
+            {
+                "record_type": "span_end",
+                "kind": "tool",
+                "name": "exec",
+                "execution": {"mode": "launcher"},
+                "resources": {"attribution_status": "unattributed"},
+                "status": {"code": "ok"},
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "record_type": "span_end",
+                "kind": "tool",
+                "name": "read",
+                "resources": {
+                    "attribution_status": "attributed",
+                    "scope": "cgroup",
+                },
+                "status": {"code": "ok"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = _inspect_trace(trace_path, "")
+    summary = _resource_summary([report])
+
+    assert report["launcher_tool_span_ends"] == 1
+    assert report["cgroup_tool_span_ends"] == 1
+    assert report["launcher_cgroup_tool_span_ends"] == 0
+    assert summary["cgroup_tool_span_ends"] == 1
+    assert summary["launcher_cgroup_tool_span_ends"] == 0
+    assert summary["cgroup_coverage_ratio"] == 0.0
 
 
 def test_inspect_trace_warns_when_ok_status_has_failed_exit_code(tmp_path: Path) -> None:
