@@ -186,15 +186,17 @@ test("exec instrumentation can force sandbox workdir from environment", async ()
   const event = {
     toolName: "exec",
     toolCallId: "call-1",
-    params: {command: "pwd", workdir: "/home/user/project"}
+    params: {command: "pwd", host: "gateway", workdir: "/home/user/project"}
   };
 
   try {
     const result = await instrumentExecParams(event, {}, payload, decision, client, baseConfig);
 
     assert.equal(result.params.workdir, "/workspace");
+    assert.equal("host" in result.params, false);
     assert.equal(result.params.env.CLAW_EXEC_WORKDIR, "/workspace");
     assert.equal(seen[0].workdir, "/workspace");
+    assert.equal(seen[0].host, "gateway");
   } finally {
     if (previous === undefined) {
       delete process.env.CLAW_EXEC_WORKDIR;

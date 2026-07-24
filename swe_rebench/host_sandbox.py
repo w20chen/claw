@@ -236,6 +236,8 @@ def _configure_openclaw(
 ) -> None:
     openclaw = _require_executable("openclaw")
     env = _openclaw_env(openclaw_home, sidecar_port, config, workspace)
+    plugin_dir = config.repo_root / config.bundle.plugin_source
+    _ensure_plugin_built(trace_dir, plugin_dir)
     endpoint_host = f"http://127.0.0.1:{sidecar_port}"
     endpoint_sandbox = f"http://host.docker.internal:{sidecar_port}"
     sandbox_config = _openclaw_config(
@@ -269,7 +271,7 @@ def _configure_openclaw(
             log,
             "openclaw_onboard",
         )
-        _run_logged([openclaw, "plugins", "install", "--link", str(config.repo_root / config.bundle.plugin_source)], env, log, "plugin_install")
+        _run_logged([openclaw, "plugins", "install", "--link", str(plugin_dir)], env, log, "plugin_install")
         _run_logged([openclaw, "plugins", "enable", "hardware-scheduler"], env, log, "plugin_enable")
         patch = subprocess.run(
             [openclaw, "config", "patch", "--stdin"],
@@ -372,6 +374,7 @@ def _openclaw_config(
                         "scope": "session",
                         "workspaceAccess": "rw",
                         "docker": {
+                            "workdir": "/workspace",
                             "network": "bridge",
                             "extraHosts": ["host.docker.internal:host-gateway"],
                             "dangerouslyAllowExternalBindSources": True,
@@ -424,6 +427,29 @@ def _openclaw_config(
         },
         indent=2,
     )
+
+
+def _ensure_plugin_built(trace_dir: Path, plugin_dir: Path) -> None:
+    package_json = plugin_dir / "package.json"
+    if not package_json.exists():
+        raise FileNotFoundError(f"plugin package.json not found: {package_json}")
+
+    npm = _require_executable("npm")
+    log_path = trace_dir / "plugin-build.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("w", encoding="utf-8") as log:
+        result = subprocess.run(
+            [npm, "run", "build"],
+            cwd=str(plugin_dir),
+            stdout=log,
+            stderr=log,
+            text=True,
+        )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"plugin_build_failed exit={result.returncode}: "
+            f"{_tail_text(log_path, 2000)}"
+        )
 
 
 def _openclaw_env(

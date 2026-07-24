@@ -7,6 +7,7 @@ from swe_rebench.config import RunnerConfig
 from swe_rebench.docker import ContainerResult
 from swe_rebench.host_sandbox import (
     _ensure_openclaw_sandbox_image,
+    _ensure_plugin_built,
     _openclaw_config,
     _openclaw_env,
     _run_openclaw_agent,
@@ -430,6 +431,7 @@ def test_host_sandbox_openclaw_config_uses_only_public_top_level_keys(tmp_path: 
 
     assert set(parsed) == {"agents", "plugins", "env"}
     docker_cfg = parsed["agents"]["defaults"]["sandbox"]["docker"]
+    assert docker_cfg["workdir"] == "/workspace"
     assert docker_cfg["extraHosts"] == ["host.docker.internal:host-gateway"]
     assert "binds" not in docker_cfg
     assert parsed["agents"]["defaults"]["sandbox"]["workspaceAccess"] == "rw"
@@ -541,6 +543,33 @@ def test_host_sandbox_builds_default_sandbox_image_when_missing(monkeypatch, tmp
         ["/usr/bin/docker", "build", "-t", "openclaw-sandbox:bookworm-slim", "-"],
     ]
     assert (tmp_path / "sandbox-image-build.log").exists()
+
+
+def test_host_sandbox_builds_plugin_before_install(monkeypatch, tmp_path: Path) -> None:
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    (plugin_dir / "package.json").write_text('{"scripts":{"build":"tsc"}}\n', encoding="utf-8")
+    calls: list[list[str]] = []
+
+    class Result:
+        returncode = 0
+
+    def fake_require(name: str) -> str:
+        assert name == "npm"
+        return "/usr/bin/npm"
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        assert kwargs["cwd"] == str(plugin_dir)
+        return Result()
+
+    monkeypatch.setattr("swe_rebench.host_sandbox._require_executable", fake_require)
+    monkeypatch.setattr("swe_rebench.host_sandbox.subprocess.run", fake_run)
+
+    _ensure_plugin_built(tmp_path / "trace", plugin_dir)
+
+    assert calls == [["/usr/bin/npm", "run", "build"]]
+    assert (tmp_path / "trace" / "plugin-build.log").exists()
 
 
 def test_host_sandbox_workspace_reset_falls_back_to_docker_on_permission_error(

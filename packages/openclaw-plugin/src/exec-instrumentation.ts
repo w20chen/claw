@@ -62,6 +62,9 @@ export async function instrumentExecParams(
   const workdirOverride = launcherWorkdirOverride();
   if (workdirOverride !== null) {
     params.workdir = workdirOverride;
+    if (params.host === "gateway") {
+      delete params.host;
+    }
   }
   let token: string | null = null;
 
