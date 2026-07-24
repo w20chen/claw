@@ -65,6 +65,7 @@ def run_host_sandbox_task(
             workspace=workspace,
             config=config,
         )
+        _cleanup_openclaw_sandbox_containers(trace_dir, workspace)
         exit_code = _run_openclaw_agent(
             trace_dir=trace_dir,
             openclaw_home=openclaw_home,
@@ -448,6 +449,46 @@ def _openclaw_config(
 def _sandbox_container_prefix(workspace: Path) -> str:
     digest = hashlib.sha256(str(workspace).encode("utf-8")).hexdigest()[:12]
     return f"claw-srb-{digest}-"
+
+
+def _cleanup_openclaw_sandbox_containers(trace_dir: Path, workspace: Path) -> None:
+    """Remove stale OpenClaw sandbox containers for this task workspace.
+
+    OpenClaw scopes sandbox containers by prefix.  Reusing a stale container can
+    leave Docker exec stuck with a host workspace cwd that is outside the
+    container mount namespace, so start each SWE-Rebench task from a fresh
+    sandbox container.
+    """
+    docker = _require_executable("docker")
+    prefix = _sandbox_container_prefix(workspace)
+    log_path = trace_dir / "sandbox-container-cleanup.log"
+    listed = subprocess.run(
+        [docker, "ps", "-aq", "--filter", f"name={prefix}"],
+        capture_output=True,
+        text=True,
+    )
+    if listed.returncode != 0:
+        _write_text(
+            log_path,
+            f"docker_ps_failed exit={listed.returncode}\n{listed.stdout}{listed.stderr}",
+        )
+        return
+
+    container_ids = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
+    if not container_ids:
+        _write_text(log_path, f"no stale containers for prefix {prefix}\n")
+        return
+
+    removed = subprocess.run(
+        [docker, "rm", "-f", *container_ids],
+        capture_output=True,
+        text=True,
+    )
+    _write_text(
+        log_path,
+        f"prefix={prefix}\ncontainers={json.dumps(container_ids)}\n"
+        f"exit={removed.returncode}\n{removed.stdout}{removed.stderr}",
+    )
 
 
 def _ensure_plugin_built(trace_dir: Path, plugin_dir: Path) -> None:

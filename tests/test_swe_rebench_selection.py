@@ -7,6 +7,7 @@ from pathlib import Path
 from swe_rebench.config import RunnerConfig
 from swe_rebench.docker import ContainerResult
 from swe_rebench.host_sandbox import (
+    _cleanup_openclaw_sandbox_containers,
     _cleanup_runtime_artifacts,
     _ensure_openclaw_sandbox_image,
     _ensure_plugin_built,
@@ -512,6 +513,33 @@ def test_host_sandbox_container_prefix_is_stable_and_workspace_scoped(tmp_path: 
     assert first.startswith("claw-srb-")
     assert first.endswith("-")
     assert len(first) < 32
+
+
+def test_host_sandbox_cleanup_removes_prefixed_openclaw_containers(monkeypatch, tmp_path: Path) -> None:
+    trace_dir = tmp_path / "trace"
+    trace_dir.mkdir()
+    workspace = tmp_path / "workspace"
+    prefix = _sandbox_container_prefix(workspace)
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((list(cmd), kwargs))
+        if cmd[:3] == ["/usr/bin/docker", "ps", "-aq"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="abc123\ndef456\n", stderr="")
+        if cmd[:3] == ["/usr/bin/docker", "rm", "-f"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="removed\n", stderr="")
+        raise AssertionError(cmd)
+
+    monkeypatch.setattr("swe_rebench.host_sandbox._require_executable", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr("swe_rebench.host_sandbox.subprocess.run", fake_run)
+
+    _cleanup_openclaw_sandbox_containers(trace_dir, workspace)
+
+    assert calls[0][0] == ["/usr/bin/docker", "ps", "-aq", "--filter", f"name={prefix}"]
+    assert calls[1][0] == ["/usr/bin/docker", "rm", "-f", "abc123", "def456"]
+    log = (trace_dir / "sandbox-container-cleanup.log").read_text(encoding="utf-8")
+    assert prefix in log
+    assert "abc123" in log
 
 
 def test_host_sandbox_openclaw_env_points_workspace_dir_at_task_workspace(tmp_path: Path) -> None:
