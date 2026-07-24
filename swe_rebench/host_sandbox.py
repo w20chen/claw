@@ -72,6 +72,7 @@ def run_host_sandbox_task(
             task=task,
             config=config,
         )
+        _cleanup_runtime_artifacts(workspace)
         _collect_patch(trace_dir, workspace, task)
     except Exception as exc:
         error = str(exc)
@@ -661,6 +662,41 @@ def _write_task_inputs(trace_dir: Path, task: TaskDef, config: RunnerConfig, wor
         )
         + "\n",
     )
+
+
+_RUNTIME_ARTIFACTS = (
+    ".claw",
+    ".local",
+    "AGENTS.md",
+    "HEARTBEAT.md",
+    "IDENTITY.md",
+    "SOUL.md",
+    "TOOLS.md",
+    "USER.md",
+    "openclaw-workspace-state.json",
+)
+
+
+def _cleanup_runtime_artifacts(workspace: Path) -> None:
+    for name in _RUNTIME_ARTIFACTS:
+        path = workspace / name
+        if not path.exists():
+            continue
+        if _git_tracks_path(workspace, name):
+            continue
+        if path.is_dir():
+            shutil.rmtree(path, onerror=_chmod_and_retry)
+        else:
+            path.unlink()
+
+
+def _git_tracks_path(workspace: Path, relative_path: str) -> bool:
+    result = subprocess.run(
+        ["git", "-C", str(workspace), "ls-files", "--error-unmatch", "--", relative_path],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
 
 
 def _collect_patch(trace_dir: Path, workspace: Path, task: TaskDef) -> None:

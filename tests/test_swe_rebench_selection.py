@@ -6,6 +6,7 @@ from pathlib import Path
 from swe_rebench.config import RunnerConfig
 from swe_rebench.docker import ContainerResult
 from swe_rebench.host_sandbox import (
+    _cleanup_runtime_artifacts,
     _ensure_openclaw_sandbox_image,
     _ensure_plugin_built,
     _openclaw_config,
@@ -636,6 +637,37 @@ def test_host_sandbox_builds_plugin_before_install(monkeypatch, tmp_path: Path) 
 
     assert calls == [["/usr/bin/npm", "run", "build"]]
     assert (tmp_path / "trace" / "plugin-build.log").exists()
+
+
+def test_host_sandbox_cleans_only_untracked_runtime_artifacts(monkeypatch, tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".claw").mkdir()
+    (workspace / ".local").mkdir()
+    (workspace / "AGENTS.md").write_text("tracked instructions\n", encoding="utf-8")
+    (workspace / "HEARTBEAT.md").write_text("runtime\n", encoding="utf-8")
+    (workspace / "openclaw-workspace-state.json").write_text("{}\n", encoding="utf-8")
+    seen: list[str] = []
+
+    class Result:
+        def __init__(self, returncode: int) -> None:
+            self.returncode = returncode
+
+    def fake_run(cmd, **kwargs):
+        relative_path = cmd[-1]
+        seen.append(relative_path)
+        return Result(0 if relative_path == "AGENTS.md" else 1)
+
+    monkeypatch.setattr("swe_rebench.host_sandbox.subprocess.run", fake_run)
+
+    _cleanup_runtime_artifacts(workspace)
+
+    assert (workspace / "AGENTS.md").exists()
+    assert not (workspace / ".claw").exists()
+    assert not (workspace / ".local").exists()
+    assert not (workspace / "HEARTBEAT.md").exists()
+    assert not (workspace / "openclaw-workspace-state.json").exists()
+    assert "AGENTS.md" in seen
 
 
 def test_host_sandbox_workspace_reset_falls_back_to_docker_on_permission_error(
