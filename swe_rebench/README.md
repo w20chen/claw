@@ -111,6 +111,10 @@ This copies `/testbed` from the task image into a host workspace, starts a host
 sidecar, configures an isolated OpenClaw home for the task, and mounts the
 workspace into the OpenClaw sandbox at `/workspace`.
 
+If the default OpenClaw sandbox image (`openclaw-sandbox:bookworm-slim`) is
+missing, the runner builds the minimal npm-install compatible image documented
+by OpenClaw and writes `sandbox-image-build.log` under the task trace directory.
+
 Resource attribution is best-effort:
 
 - `exec` still uses the managed wrapper at `/workspace/.claw/bin/claw-launch`.

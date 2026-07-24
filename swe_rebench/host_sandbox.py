@@ -48,6 +48,7 @@ def run_host_sandbox_task(
         _export_testbed_from_image(task.image, workspace, config.docker.pull_policy)
         _install_sandbox_launcher(workspace, bundle_dir)
         _write_task_inputs(trace_dir, task, config, workspace)
+        _ensure_openclaw_sandbox_image(trace_dir)
 
         sidecar = _start_sidecar(
             trace_dir=trace_dir,
@@ -121,6 +122,44 @@ def _export_testbed_from_image(image: str, workspace: Path, pull_policy: str) ->
         _run_checked([docker, "cp", f"{container_id}:/testbed/.", str(workspace)], "docker_cp_testbed")
     finally:
         subprocess.run([docker, "rm", "-f", container_id], capture_output=True, text=True)
+
+
+def _ensure_openclaw_sandbox_image(trace_dir: Path) -> None:
+    image = "openclaw-sandbox:bookworm-slim"
+    docker = _require_executable("docker")
+    inspect = subprocess.run(
+        [docker, "image", "inspect", image],
+        capture_output=True,
+        text=True,
+    )
+    if inspect.returncode == 0:
+        return
+
+    dockerfile = (
+        "FROM debian:bookworm-slim\n"
+        "ENV DEBIAN_FRONTEND=noninteractive\n"
+        "RUN apt-get update && apt-get install -y --no-install-recommends \\\n"
+        "  bash ca-certificates curl git jq python3 ripgrep \\\n"
+        "  && rm -rf /var/lib/apt/lists/*\n"
+        "RUN useradd --create-home --shell /bin/bash sandbox\n"
+        "USER sandbox\n"
+        "WORKDIR /home/sandbox\n"
+        'CMD ["sleep", "infinity"]\n'
+    )
+    log_path = trace_dir / "sandbox-image-build.log"
+    with log_path.open("w", encoding="utf-8") as log:
+        result = subprocess.run(
+            [docker, "build", "-t", image, "-"],
+            input=dockerfile,
+            stdout=log,
+            stderr=log,
+            text=True,
+        )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"openclaw_sandbox_image_build_failed exit={result.returncode}: "
+            f"{_tail_text(log_path, 2000)}"
+        )
 
 
 def _install_sandbox_launcher(workspace: Path, bundle_dir: Path) -> None:

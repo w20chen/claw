@@ -5,7 +5,7 @@ from pathlib import Path
 
 from swe_rebench.config import RunnerConfig
 from swe_rebench.docker import ContainerResult
-from swe_rebench.host_sandbox import _openclaw_config
+from swe_rebench.host_sandbox import _ensure_openclaw_sandbox_image, _openclaw_config
 from swe_rebench.task_source import TaskDef
 from swe_rebench.prepare import _ENTRYPOINT_TEMPLATE, _PLUGIN_CONFIG, _write_entrypoint
 from swe_rebench.task_source import filter_tasks, parse_instance_ids, tasks_from_records
@@ -388,6 +388,39 @@ def test_host_sandbox_openclaw_config_uses_only_public_top_level_keys(tmp_path: 
     docker_cfg = parsed["agents"]["defaults"]["sandbox"]["docker"]
     assert docker_cfg["extraHosts"] == ["host.docker.internal:host-gateway"]
     assert docker_cfg["binds"][0].endswith(":/workspace:rw")
+
+
+def test_host_sandbox_builds_default_sandbox_image_when_missing(monkeypatch, tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+
+    def fake_which(name: str):
+        return "/usr/bin/docker" if name == "docker" else None
+
+    class Result:
+        def __init__(self, returncode: int) -> None:
+            self.returncode = returncode
+            self.stdout = ""
+            self.stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        if cmd[:3] == ["/usr/bin/docker", "image", "inspect"]:
+            return Result(1)
+        if cmd[:4] == ["/usr/bin/docker", "build", "-t", "openclaw-sandbox:bookworm-slim"]:
+            assert kwargs["input"].startswith("FROM debian:bookworm-slim")
+            return Result(0)
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr("swe_rebench.host_sandbox.shutil.which", fake_which)
+    monkeypatch.setattr("swe_rebench.host_sandbox.subprocess.run", fake_run)
+
+    _ensure_openclaw_sandbox_image(tmp_path)
+
+    assert calls == [
+        ["/usr/bin/docker", "image", "inspect", "openclaw-sandbox:bookworm-slim"],
+        ["/usr/bin/docker", "build", "-t", "openclaw-sandbox:bookworm-slim", "-"],
+    ]
+    assert (tmp_path / "sandbox-image-build.log").exists()
 
 
 def test_runner_config_parses_docker_bool_strings(tmp_path: Path) -> None:
