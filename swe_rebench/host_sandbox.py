@@ -241,7 +241,10 @@ def _configure_openclaw(
             env=env,
         )
         if patch.returncode != 0:
-            raise RuntimeError(f"openclaw_config_patch_failed exit={patch.returncode}")
+            raise RuntimeError(
+                f"openclaw_config_patch_failed exit={patch.returncode}: "
+                f"{_tail_text(phase_log, 2000)}"
+            )
 
 
 def _run_openclaw_agent(
@@ -318,7 +321,6 @@ def _openclaw_config(
     config: RunnerConfig,
 ) -> str:
     escaped_workspace = str(workspace.resolve()).replace("\\", "\\\\")
-    escaped_plugin = str(config.repo_root / config.bundle.plugin_source).replace("\\", "\\\\")
     return json.dumps(
         {
             "agents": {
@@ -331,6 +333,7 @@ def _openclaw_config(
                         "docker": {
                             "network": "bridge",
                             "binds": [f"{escaped_workspace}:/workspace:rw"],
+                            "extraHosts": ["host.docker.internal:host-gateway"],
                             "dangerouslyAllowExternalBindSources": True,
                         },
                     },
@@ -377,10 +380,6 @@ def _openclaw_config(
             },
             "env": {
                 "CLAW_SCHEDULER_ENDPOINT": endpoint_sandbox,
-            },
-            "sweRebench": {
-                "runtimeMode": "host-openclaw-sandbox",
-                "pluginSource": escaped_plugin,
             },
         },
         indent=2,
@@ -649,6 +648,14 @@ def _reset_directory(path: Path) -> None:
 def _write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def _tail_text(path: Path, max_chars: int) -> str:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return f"cannot read log: {exc}"
+    return text[-max_chars:]
 
 
 def _require_executable(name: str) -> str:

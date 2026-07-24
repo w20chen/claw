@@ -5,6 +5,7 @@ from pathlib import Path
 
 from swe_rebench.config import RunnerConfig
 from swe_rebench.docker import ContainerResult
+from swe_rebench.host_sandbox import _openclaw_config
 from swe_rebench.task_source import TaskDef
 from swe_rebench.prepare import _ENTRYPOINT_TEMPLATE, _PLUGIN_CONFIG, _write_entrypoint
 from swe_rebench.task_source import filter_tasks, parse_instance_ids, tasks_from_records
@@ -369,6 +370,24 @@ bundle:
     assert result.exit_code == 0
     assert called["task"] == task
     assert called["config"] == config
+
+
+def test_host_sandbox_openclaw_config_uses_only_public_top_level_keys(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("", encoding="utf-8")
+    config = RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
+    raw = _openclaw_config(
+        endpoint_host="http://127.0.0.1:8765",
+        endpoint_sandbox="http://host.docker.internal:8765",
+        workspace=tmp_path / "workspace",
+        config=config,
+    )
+    parsed = json.loads(raw)
+
+    assert set(parsed) == {"agents", "plugins", "env"}
+    docker_cfg = parsed["agents"]["defaults"]["sandbox"]["docker"]
+    assert docker_cfg["extraHosts"] == ["host.docker.internal:host-gateway"]
+    assert docker_cfg["binds"][0].endswith(":/workspace:rw")
 
 
 def test_runner_config_parses_docker_bool_strings(tmp_path: Path) -> None:
