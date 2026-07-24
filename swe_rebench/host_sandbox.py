@@ -391,7 +391,7 @@ def _openclaw_config(
                             "sendRawParams": False,
                             "recordRawTrace": False,
                             "authTokenEnv": "OPENCLAW_SCHEDULER_TOKEN",
-                            "logLevel": "info",
+                            "logLevel": "warn",
                             "executionBackend": "managed-wrapper",
                             "launcherPath": "/workspace/.claw/bin/claw-launch",
                             "instrumentHosts": ["gateway", "*"],

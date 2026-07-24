@@ -395,6 +395,8 @@ def test_host_sandbox_openclaw_config_uses_only_public_top_level_keys(tmp_path: 
     assert docker_cfg["extraHosts"] == ["host.docker.internal:host-gateway"]
     assert "binds" not in docker_cfg
     assert parsed["agents"]["defaults"]["sandbox"]["workspaceAccess"] == "rw"
+    plugin_cfg = parsed["plugins"]["entries"]["hardware-scheduler"]["config"]
+    assert plugin_cfg["logLevel"] == "warn"
 
 
 def test_host_sandbox_openclaw_env_points_workspace_dir_at_task_workspace(tmp_path: Path) -> None:

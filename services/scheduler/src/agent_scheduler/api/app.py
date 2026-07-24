@@ -71,7 +71,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
         )
 
     def with_sandbox_fallback(request: ToolBeforeRequest, s: AppState) -> ToolBeforeRequest:
-        if request.resource_scope is not None or request.tool_name == "exec":
+        if request.resource_scope is not None:
             return request
         scope = sandbox_fallback_scope(s)
         if scope is None:
@@ -82,7 +82,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
         event: ToolCompletedEvent,
         s: AppState,
     ) -> ToolCompletedEvent:
-        if event.resource_scope is not None or event.tool_name == "exec":
+        if event.resource_scope is not None:
             return event
         scope = sandbox_fallback_scope(s)
         if scope is None:

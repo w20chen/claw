@@ -217,6 +217,9 @@ class RealtimeToolMonitor:
                 return
             request = active.request.model_copy(update={"resource_scope": scope})
             snapshot = self.sampler.snapshot(request.resource_scope)
+            if not snapshot.available and active.latest_snapshot.available:
+                self._active[self._key(active.request.tool_call_id, active.request.event_id)] = active
+                return
             self._active[self._key(request.tool_call_id, request.event_id)] = _ActiveTool(
                 request=request,
                 snapshot=snapshot,

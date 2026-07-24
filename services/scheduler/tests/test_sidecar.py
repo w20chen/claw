@@ -286,6 +286,78 @@ def test_internal_tool_uses_shared_sandbox_cgroup_fallback(tmp_path: Path) -> No
     assert tool_end["resources"]["coverage_reason"] == "shared_sandbox_container"
 
 
+def test_exec_tool_can_use_shared_sandbox_cgroup_fallback(tmp_path: Path) -> None:
+    cgroup = tmp_path / "cgroup"
+    cgroup.mkdir()
+    (cgroup / "cpu.stat").write_text("usage_usec 100000\n", encoding="utf-8")
+    (cgroup / "memory.current").write_text("4096\n", encoding="utf-8")
+    (cgroup / "io.stat").write_text("8:0 rbytes=10 wbytes=20\n", encoding="utf-8")
+    (cgroup / "cgroup.procs").write_text("", encoding="utf-8")
+    client, trace_dir = _trace_client_with_sandbox_cgroup(tmp_path, cgroup)
+    request: dict[str, object] = {
+        "schema_version": "scheduler.v1",
+        "event_id": "evt-exec-start",
+        "occurred_at": "2026-07-16T03:23:00Z",
+        "plugin_version": "0.1.0",
+        "run_id": "run-sandbox-exec",
+        "session_id": "session-sandbox-exec",
+        "session_key": None,
+        "agent_id": None,
+        "tool_call_id": "call-exec",
+        "tool_name": "exec",
+        "tool_kind": "shell",
+        "tool_input_kind": "json",
+        "operation_hint": "ls",
+        "derived_paths": [],
+        "params_digest": "sha256:" + "b" * 64,
+        "param_features": {
+            "serialized_size_bytes": 10,
+            "string_length": 5,
+            "list_item_count": 0,
+            "path_count": 0,
+            "has_command_like_field": True,
+        },
+        "raw_params": {"command": "ls"},
+        "resource_scope": None,
+    }
+    decision = client.post("/v1/decisions/tool", json=request).json()
+    (cgroup / "cpu.stat").write_text("usage_usec 200000\n", encoding="utf-8")
+    completion = {
+        "schema_version": "scheduler.v1",
+        "event_id": "evt-exec-end",
+        "occurred_at": "2026-07-16T03:23:01Z",
+        "plugin_version": "0.1.0",
+        "run_id": "run-sandbox-exec",
+        "session_id": "session-sandbox-exec",
+        "session_key": None,
+        "agent_id": None,
+        "tool_call_id": "call-exec",
+        "decision_id": decision["decision_id"],
+        "lease_id": decision["lease_id"],
+        "execution_id": "call-exec",
+        "tool_name": "exec",
+        "duration_ms": 100,
+        "succeeded": True,
+        "error_type": None,
+        "error_digest": None,
+        "result_size_bytes": None,
+        "raw_result": {"details": {"exitCode": 0}},
+        "resource_scope": None,
+    }
+
+    assert client.post("/v1/events/tool-completed", json=completion).json() == {"stored": True}
+
+    tool_end = next(
+        r
+        for r in _read_trace_records(trace_dir)
+        if r.get("record_type") == "span_end" and r.get("kind") == "tool"
+    )
+    assert tool_end["execution"]["mode"] == "launcher"
+    assert tool_end["resources"]["attribution_status"] == "partially_attributed"
+    assert tool_end["resources"]["scope"] == "cgroup"
+    assert tool_end["resources"]["coverage_reason"] == "shared_sandbox_container"
+
+
 def test_resource_timeline_uses_interval_rates() -> None:
     timeline = _relative_timeline(
         [
