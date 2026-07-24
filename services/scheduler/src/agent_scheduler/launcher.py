@@ -250,7 +250,8 @@ def _prepare_cgroup(
       2. /sys/fs/cgroup/claw           (root / pre-delegated)
       3. /sys/fs/cgroup/user.slice/    (systemd, writable by non-root)
 
-    Set CLAW_ENABLE_CGROUP=0 to disable cgroup entirely.
+    Cgroups are opt-in through profiling.enable_cgroup or CLAW_CGROUP_REQUIRED=1.
+    Set CLAW_ENABLE_CGROUP=0 to disable automatic cgroup creation.
     Set CLAW_CGROUP_REQUIRED=1 to fail hard when no root is writable.
     """
     required = _env_enabled("CLAW_CGROUP_REQUIRED")
@@ -258,7 +259,7 @@ def _prepare_cgroup(
         if required:
             raise RuntimeError("cgroup_unavailable: posix_controls_unsupported")
         return _explicit_cgroup_path()
-    if not required and not _enabled(profiling, "enable_cgroup", True):
+    if not required and not _enabled(profiling, "enable_cgroup", False):
         return _explicit_cgroup_path()
     explicit = _explicit_cgroup_path()
     if explicit:

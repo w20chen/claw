@@ -1,14 +1,10 @@
-# Limitations
+# Limits
 
-- `placement_advice` is not placement enforcement.
-- Generic OpenClaw hooks cannot guarantee control over arbitrary tool
-  subprocess CPU affinity.
-- Real CPU/NUMA/LLC enforcement requires a managed executor, container layer, or
-  OpenClaw execution-layer adapter.
-- `agent_end` is not registered in the MVP.
-- KV cache and GPU serving joint scheduling are not implemented.
-- Observe mode never changes agent behavior.
-- Hook and HTTP timeouts limit admission-control precision.
-- If OpenClaw does not expose a tool PID, resource samples are intentionally
-  marked `unattributed`; only duration, prediction, and command-category
-  telemetry are available for that tool call.
+- The current policy observes and records; it is not a CPU optimizer yet.
+- Placement advice is advisory unless the launcher can apply it.
+- Resource attribution is best with `executionBackend: "managed-wrapper"`.
+- Tools without a trusted PID/cgroup are still traced, but resource fields may
+  be null or `unattributed`.
+- Full LLM content requires routing OpenClaw through the sidecar proxy.
+- Docker, real task images, and a valid LLM key are required for live
+  SWE-Rebench runs.

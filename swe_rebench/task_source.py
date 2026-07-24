@@ -110,7 +110,51 @@ def load_tasks_from_simple_list(path: str | Path) -> list[TaskDef]:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, list):
         raise ValueError(f"Expected a JSON array, got {type(data)}")
-    return [_record_to_task(item) for item in data]
+    return tasks_from_records(data)
+
+
+def tasks_from_records(records: list[dict[str, Any]]) -> list[TaskDef]:
+    """Convert raw task dictionaries to TaskDef objects."""
+    return [_record_to_task(item) for item in records if isinstance(item, dict)]
+
+
+def filter_tasks(
+    tasks: list[TaskDef],
+    *,
+    sample: int | None = None,
+    skip: int = 0,
+    instance_ids: list[str] | None = None,
+    repo: str | None = None,
+) -> list[TaskDef]:
+    """Apply benchmark-style task selection.
+
+    Selection order follows agent-test-bench's user-facing flow:
+    first narrow by explicit instance IDs or repo, then apply skip/sample.
+    Explicit instance IDs preserve the user-provided order.
+    """
+    selected = list(tasks)
+
+    if instance_ids:
+        by_id = {task.instance_id: task for task in selected}
+        selected = [by_id[iid] for iid in instance_ids if iid in by_id]
+    elif repo:
+        selected = [task for task in selected if task.repo == repo]
+
+    if skip > 0:
+        selected = selected[skip:]
+
+    if sample is not None and sample > 0:
+        selected = selected[:sample]
+
+    return selected
+
+
+def parse_instance_ids(value: str | None) -> list[str] | None:
+    """Parse a comma-separated instance ID list."""
+    if value is None:
+        return None
+    ids = [item.strip() for item in value.split(",") if item.strip()]
+    return ids or None
 
 
 def create_single_task(
@@ -163,6 +207,7 @@ def _record_to_task(record: dict[str, Any]) -> TaskDef:
         record.get("docker_image")
         or record.get("image")
         or record.get("container_image")
+        or record.get("image_name")
         or ""
     )
     # swe-rebench sometimes has "image_name" + "image_tag"

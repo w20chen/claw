@@ -1,1 +1,0 @@
-sudo lsof -t -i :8765 | xargs -r sudo kill -9

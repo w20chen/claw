@@ -83,5 +83,5 @@ agent:
   # Maximum tool-call turns before the agent is stopped.
   max_turns: 50
 
-  # Extra arguments passed to `openclaw run`.
+  # Extra arguments passed to `openclaw agent`.
   extra_args: []

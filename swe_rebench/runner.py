@@ -45,7 +45,13 @@ from typing import Any
 from swe_rebench.config import RunnerConfig
 from swe_rebench.docker import ContainerResult, get_docker_client, pull_image, run_container
 from swe_rebench.prepare import build_bundle
-from swe_rebench.task_source import TaskDef, create_single_task, load_tasks_from_swebench_dataset
+from swe_rebench.task_source import (
+    TaskDef,
+    create_single_task,
+    filter_tasks,
+    load_tasks_from_swebench_dataset,
+    parse_instance_ids,
+)
 
 
 # ── Report helpers ────────────────────────────────────────────────
@@ -402,8 +408,14 @@ def main() -> None:
                        help="Single Docker image to run (requires --task-id and --problem)")
     run_p.add_argument("--task-id", default=None, help="Task ID for single-image mode")
     run_p.add_argument("--problem", default=None, help="Problem statement for single-image mode")
-    run_p.add_argument("--sample", type=int, default=0,
-                       help="Run only the first N tasks (0 = all)")
+    run_p.add_argument("--sample", type=int, default=None,
+                       help="Run only the first N selected tasks")
+    run_p.add_argument("--skip", type=int, default=0,
+                       help="Skip the first N selected tasks before --sample")
+    run_p.add_argument("--instance-ids", default=None,
+                       help="Comma-separated instance IDs to run, preserving the given order")
+    run_p.add_argument("--repo", default=None,
+                       help="Run only tasks whose repo field matches this value")
     run_p.add_argument("--parallelism", type=int, default=None,
                        help="Override parallelism from config")
     run_p.add_argument("--export", action="store_true",
@@ -447,10 +459,15 @@ def main() -> None:
             _log("Preparing runtime bundle...")
             build_bundle(config)
 
-        # Load tasks
+        # Load and select tasks
         tasks = _load_tasks(args, repo_root)
-        if args.sample > 0:
-            tasks = tasks[: args.sample]
+        tasks = filter_tasks(
+            tasks,
+            sample=args.sample,
+            skip=max(0, args.skip),
+            instance_ids=parse_instance_ids(args.instance_ids),
+            repo=args.repo,
+        )
 
         if not tasks:
             _log("ERROR: no tasks loaded.  Provide --dataset, --tasks, or --image.")
@@ -516,7 +533,28 @@ def _load_tasks(args: argparse.Namespace, repo_root: Path) -> list[TaskDef]:
             )
         return load_tasks_from_swebench_dataset(path)
 
+    default_dataset = _default_agent_test_bench_tasks(repo_root)
+    if default_dataset is not None:
+        _log(f"Using default SWE-Rebench task source: {default_dataset}")
+        return load_tasks_from_swebench_dataset(default_dataset)
+
     return []
+
+
+def _default_agent_test_bench_tasks(repo_root: Path) -> Path | None:
+    """Find the local agent-test-bench SWE-Rebench tasks file if present."""
+    candidates: list[Path] = []
+    env_root = os.getenv("AGENT_TEST_BENCH_ROOT")
+    if env_root:
+        candidates.append(Path(env_root) / "data" / "swe-rebench" / "tasks.json")
+    candidates.extend([
+        repo_root / "swe_rebench" / "tasks.json",
+        repo_root.parent / "agent-test-bench" / "data" / "swe-rebench" / "tasks.json",
+    ])
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
 
 
 if __name__ == "__main__":

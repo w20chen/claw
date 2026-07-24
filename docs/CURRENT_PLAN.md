@@ -1,143 +1,39 @@
 # Current Plan
 
-This file tracks the current implementation state and validation commands that
-matter for the next development step. Historical detail belongs in git history,
-not in this working plan.
+Current objective: keep this repository easy to run as an OpenClaw plugin,
+sidecar, and SWE-Rebench batch runner.
 
-## Current Priority
+## User Commands
 
-- Do not implement CPU-side scheduling optimization yet.
-- Keep the MVP focused on:
-  - OpenClaw plugin delivery.
-  - Sidecar protocol and persistence.
-  - Per-tool runtime resource monitoring.
-  - Live agent-test-bench-style `trace.jsonl`.
-  - Full LLM trace capture through the sidecar LLM proxy.
-  - Raw tool trace capture through plugin hooks.
-
-## Implemented
-
-- `scheduler.v1` tool/model contracts and examples.
-- `scheduler.v2` managed execution registration:
-  - register
-  - claim
-  - started
-  - exited
-  - scope lookup
-- TypeScript OpenClaw plugin hooks:
-  - `before_tool_call`
-  - `after_tool_call`
-  - `model_call_started`
-  - `model_call_ended`
-- `exec` instrumentation backends:
-  - `hook-only`
-  - `marker`
-  - `managed-wrapper`
-- Python reference `claw-launch`.
-- Runtime samples for scoped tools:
-  - CPU time and average CPU utilization
-  - observed peak RSS memory
-  - disk read/write bytes and average throughput
-  - best-effort network rx/tx bytes and average throughput
-  - context switches
-  - compact per-tool resource timeline
-- Optional `AGENT_SCHEDULER_TRACE_DIR` live trace writer.
-- CLI trace visualization with `tools/inspect_trace.py`.
-- OpenAI-compatible LLM proxy for full request/response capture:
-  - `/v1/models`
-  - `/v1/chat/completions`
-  - streaming response reconstruction
-  - automatic `/v1/models` normalisation (always-on, no config needed)
-  - model name spoofing (`AGENT_SCHEDULER_LLM_PROXY_EXPOSE_MODEL` /
-    `AGENT_SCHEDULER_LLM_PROXY_UPSTREAM_MODEL`) for cross-provider
-    model name translation (e.g. OpenRouter)
-- Optional plugin `recordRawTrace=true` capture of hook-visible tool
-  args/results and raw hook payloads.
-- Offline `agent-test-bench` trace importer and benchmark adapter.
-
-## Current Boundaries
-
-- Placement is advisory at the scheduler policy layer.
-- Linux CPU cpuset/affinity exists only in the reference launcher path.
-- Resource attribution is reliable only with trusted PID or cgroup scope.
-- Network I/O is namespace-level best effort from `/proc/<pid>/net/dev`.
-- Tools without scope are traced but marked `unattributed`.
-- Full LLM content is recorded only when OpenClaw routes the selected provider
-  through the sidecar LLM proxy.
-- Raw tool content is recorded only when the plugin is explicitly configured
-  with `recordRawTrace=true`.
-- Do not modify OpenClaw core.
-- Do not modify `C:\Users\29068\Desktop\agent-test-bench`.
-
-## SWE-Rebench Integration (swe_rebench/)
-
-The `swe_rebench/` package is an **independent** batch runner that runs
-swe-rebench tasks inside Docker containers with full OpenClaw + sidecar
-trace collection.
-
-- **Isolation**: Does not modify `packages/openclaw-plugin/`, `services/scheduler/`,
-  or OpenClaw core.  All code lives under `swe_rebench/`.
-- **Bundle**: `python -m swe_rebench.runner prepare --config config.yaml` assembles
-  a runtime bundle that gets volume-mounted into each container at `/claw`.
-- **Per-task traces**: Each task writes `trace.jsonl` to a dedicated directory
-  under `swe_rebench/traces/<task_id>/`.
-- **Flat export**: `--export` copies all traces to `swe_rebench/export/` keyed
-  by task ID.
-- **Sub-commands**: `prepare`, `run`, `collect`, `cleanup`.
-- **Task sources**: swe-bench JSON/JSONL datasets, simple JSON lists, or
-  single-task CLI (`--image` + `--task-id` + `--problem`).
-- **HuggingFace discovery**: `python -m swe_rebench.discover --sample N --out file.json`
-- **Config**: `swe_rebench/config.example.yaml` (copy and edit as `config.yaml`).
-- **OpenRouter support**: Set `upstream_base_url`, `model`, and `openclaw_model_ref`
-  in config.  Sidecar auto-normalises `/v1/models` and translates model names.
-- **CLI ergonomics**: `--config` accepted both before and after the subcommand.
-
-Files:
-- `swe_rebench/runner.py` — main CLI orchestrator
-- `swe_rebench/prepare.py` — bundle assembler (+ container entrypoint/setup generator)
-- `swe_rebench/docker.py` — Docker SDK wrapper with CLI fallback
-- `swe_rebench/task_source.py` — multi-format task loader
-- `swe_rebench/config.py` — YAML config with env-var substitution
-
-## Validation Commands
-
-Run after code changes:
+Normal OpenClaw:
 
 ```bash
-python3 tools/validate_contracts.py
-python3 -m pytest tests -q --basetemp .pytest-tmp-root
-
-cd services/scheduler
-python3 -m pytest tests -q
-
-cd ../../packages/openclaw-plugin
-npm test
-npm run typecheck
+python -m pip install -e "services/scheduler[dev]"
+cd packages/openclaw-plugin && npm install && npm run build && cd ../..
+cp .env.example .env
+python -m agent_scheduler.main --host 127.0.0.1 --port 8765
 ```
 
-Use `npm.cmd` on Windows PowerShell when `npm.ps1` is blocked.
+SWE-Rebench:
 
-## Last Known Validation
+```bash
+cp swe_rebench/config.example.yaml swe_rebench/config.yaml
+python -m swe_rebench.runner prepare --config swe_rebench/config.yaml
+python -m swe_rebench.discover --sample 20 --out swe_rebench/tasks.json
+python -m swe_rebench.runner run --config swe_rebench/config.yaml \
+  --dataset swe_rebench/tasks.json --sample 10 --parallelism 4 --export
+```
 
-- Passed: `python tools\validate_contracts.py` (2026-07-24)
-- Passed: `python -m pytest tests -q --basetemp .pytest-tmp-root` (2026-07-24)
-  - 3 passed.
-- Passed: `cd services\scheduler && python -m pytest tests -q` (2026-07-24)
-  - 34 passed, 1 warning.
-- Passed: `cd packages\openclaw-plugin && npm.cmd test` (2026-07-24)
-  - 38 Node tests passed.
-- Passed: `cd packages\openclaw-plugin && npm.cmd run typecheck` (2026-07-24)
-- Passed: `python -m py_compile swe_rebench\config.py swe_rebench\docker.py swe_rebench\prepare.py swe_rebench\runner.py swe_rebench\task_source.py` (2026-07-24)
-- Passed: `python -m swe_rebench.runner run --config swe_rebench/config.example.yaml --image example/image:latest --task-id demo --problem "demo" --dry-run` (2026-07-24)
-- Not run: live `python -m swe_rebench.runner run --prepare ...` Docker task execution.
-  - Requires a real swe-rebench task image, container runtime access, and a valid upstream LLM API key/model configuration.
+## Validation
 
-## Known Environment Notes
+```bash
+python tools/validate_contracts.py
+python -m pytest tests -q --basetemp .pytest-tmp-root
+cd services/scheduler && python -m pytest tests -q
+cd packages/openclaw-plugin && npm test && npm run typecheck
+```
 
-- OpenClaw validated baseline: `2026.7.1`.
-- PowerShell may block npm `.ps1` shims; use `.cmd`.
-- On Windows, pass `--basetemp .pytest-tmp-root` so pytest writes temporary
-  files inside the workspace.
-- Full live OpenClaw agent validation still depends on local model auth.
-- Docker/Podman validation for `agent-test-bench` must be run on a host with
-  container support.
+## Not Run Locally
+
+- Live SWE-Rebench Docker task execution requires Docker access, real task
+  images, and a valid upstream LLM key/model configuration.

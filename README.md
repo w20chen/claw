@@ -1,29 +1,10 @@
 # OpenClaw Agent Scheduler
 
 OpenClaw Agent Scheduler is an OpenClaw plugin plus a Python sidecar. It records
-OpenClaw model/tool activity, captures full LLM traffic through an
-OpenAI-compatible proxy, and samples per-tool CPU, memory, disk, and network
-usage when a trusted PID or cgroup scope is available.
+OpenClaw model/tool traces and per-tool resource usage. It also includes a
+SWE-Rebench batch runner.
 
-The project does not modify OpenClaw core. JSON Schema files in `contracts/`
-are the public protocol source of truth.
-
-## Choose Your Path
-
-- Use OpenClaw normally with tracing and resource recording:
-  [docs/operator-guide.md](docs/operator-guide.md)
-- Run SWE-Rebench batches in containers:
-  [swe_rebench/README.md](swe_rebench/README.md)
-- Check supported features and validation commands:
-  [docs/supported-features.md](docs/supported-features.md)
-- Understand sidecar endpoints and configuration:
-  [docs/sidecar.md](docs/sidecar.md)
-- Understand plugin hook behavior:
-  [docs/openclaw-plugin.md](docs/openclaw-plugin.md)
-
-## Normal OpenClaw Quick Start
-
-Install and build:
+## Install
 
 ```bash
 python -m pip install -e "services/scheduler[dev]"
@@ -34,6 +15,8 @@ npm run build
 cd ../..
 ```
 
+## Run With OpenClaw
+
 Start the sidecar:
 
 ```bash
@@ -41,17 +24,24 @@ cp .env.example .env
 python -m agent_scheduler.main --host 127.0.0.1 --port 8765
 ```
 
-In another shell, install and enable the plugin:
+Before starting the sidecar, please ensure that port 8765 is not occupied. If the port is already in use by another process, you can forcefully release it with the following command:
+
+```bash
+sudo lsof -t -i :8765 | xargs -r sudo kill -9
+``
+
+Install the plugin:
 
 ```bash
 openclaw plugins install --link ./packages/openclaw-plugin
 openclaw plugins enable hardware-scheduler
-openclaw plugins inspect hardware-scheduler --runtime --json
 ```
 
-Configure OpenClaw to send model traffic through the sidecar proxy:
+Route OpenClaw model traffic through the sidecar proxy:
 
 ```bash
+export LLM_API_KEY="sk-..."
+
 openclaw onboard --non-interactive --accept-risk --skip-health \
   --mode local \
   --auth-choice vllm \
@@ -60,8 +50,8 @@ openclaw onboard --non-interactive --accept-risk --skip-health \
   --custom-model-id "deepseek-v4-flash"
 ```
 
-Configure the plugin. Replace the launcher path with the absolute path printed
-by `claw-launch --help` / your shell's command lookup:
+Configure the plugin. Replace `launcherPath` with your absolute `claw-launch`
+path:
 
 ```bash
 cat <<'JSON5' | openclaw config patch --stdin
@@ -86,48 +76,60 @@ cat <<'JSON5' | openclaw config patch --stdin
 JSON5
 ```
 
-Run an agent and inspect traces:
+Run:
 
 ```bash
 openclaw agent --local --agent main --model "vllm/deepseek-v4-flash" \
   --message "Use the shell to run: python -c 'print(\"trace-ok\")'. Then summarize the result."
+```
 
+Inspect:
+
+```bash
 curl "http://127.0.0.1:8765/v1/tools/recent?limit=5"
 ls data/traces
 python tools/inspect_trace.py data/traces/<trace-file>.jsonl --all --details
 ```
 
-For a complete step-by-step flow, including cgroup notes and troubleshooting,
-use [docs/operator-guide.md](docs/operator-guide.md).
-
-## SWE-Rebench Quick Start
+## Run SWE-Rebench In Batch
 
 ```bash
 cp swe_rebench/config.example.yaml swe_rebench/config.yaml
-# Edit llm.api_key, or leave api_key: "${LLM_API_KEY}" and export LLM_API_KEY.
+# Edit llm.api_key, or export LLM_API_KEY.
 
 python -m swe_rebench.runner prepare --config swe_rebench/config.yaml
+python -m swe_rebench.discover --sample 20 --out swe_rebench/tasks.json
 
 python -m swe_rebench.runner run --config swe_rebench/config.yaml \
-  --image swebrebench/sweb.eval.x86_64.django:latest \
-  --task-id django__example \
-  --problem "Fix the bug described by the benchmark task."
+  --prepare \
+  --dataset swe_rebench/tasks.json \
+  --sample 10 \
+  --parallelism 4 \
+  --export
 ```
 
-Batch usage, datasets, exports, and provider examples are documented in
-[swe_rebench/README.md](swe_rebench/README.md).
+Useful selectors:
 
-## Important Defaults
+```bash
+python -m swe_rebench.runner run --config swe_rebench/config.yaml \
+  --dataset swe_rebench/tasks.json \
+  --instance-ids django__django-12345,sympy__sympy-67890
 
-- Sidecar URL: `http://127.0.0.1:8765`
-- Sidecar trace directory: `data/traces` when using `.env.example`
-- LLM proxy upstream: DeepSeek by default
-- Plugin mode: `observe`
-- Plugin raw trace capture: disabled by package default, enabled in the
-  recommended config with `recordRawTrace: true`
-- Resource attribution: strongest with `executionBackend: "managed-wrapper"`
+python -m swe_rebench.runner run --config swe_rebench/config.yaml \
+  --dataset swe_rebench/tasks.json \
+  --repo django/django \
+  --sample 5 \
+  --dry-run
+```
 
-## Validation
+## More
+
+- Normal OpenClaw guide: [docs/operator-guide.md](docs/operator-guide.md)
+- SWE-Rebench guide: [swe_rebench/README.md](swe_rebench/README.md)
+- Deployment: [docs/deployment.md](docs/deployment.md)
+- Troubleshooting: [docs/operator-guide.md#troubleshooting](docs/operator-guide.md#troubleshooting)
+
+## Validate
 
 ```bash
 python tools/validate_contracts.py
@@ -140,6 +142,3 @@ cd ../../packages/openclaw-plugin
 npm test
 npm run typecheck
 ```
-
-On Windows PowerShell, use `npm.cmd` or `openclaw.cmd` if `.ps1` shims are
-blocked.

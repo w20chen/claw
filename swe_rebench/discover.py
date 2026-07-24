@@ -31,6 +31,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from swe_rebench.task_source import (
+    filter_tasks,
+    load_tasks_from_swebench_dataset,
+    parse_instance_ids,
+    tasks_from_records,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HF_DATASET = "nebius/SWE-rebench"
@@ -43,19 +50,25 @@ def discover_from_agent_test_bench(
     bench_root: Path,
     sample: int = 0,
 ) -> list[dict[str, Any]]:
-    """Load tasks from HuggingFace (agent-test-bench path is informational).
+    """Load tasks from a local agent-test-bench checkout when available.
 
-    The ``inspect_swebench.py list`` output is a human-readable table
-    that cannot be reliably parsed.  We go straight to the HuggingFace
-    ``datasets`` API via subprocess, which is the same data source
-    agent-test-bench uses internally.
+    agent-test-bench prepares SWE-Rebench tasks at
+    ``data/swe-rebench/tasks.json``. Prefer that file because it matches the
+    benchmark harness examples and avoids network access. If it is absent,
+    fall back to the HuggingFace loader.
     """
-    # Verify bench_root exists as a sanity check, but don't depend on it.
     if not bench_root.exists():
         raise FileNotFoundError(
             f"agent-test-bench not found at {bench_root}. "
             f"Set AGENT_TEST_BENCH_ROOT or use --bench-root."
         )
+
+    tasks_path = bench_root / "data" / "swe-rebench" / "tasks.json"
+    if tasks_path.exists():
+        loaded = load_tasks_from_swebench_dataset(tasks_path)
+        tasks = [_task_to_record(task) for task in loaded]
+        return tasks[:sample] if sample > 0 else tasks
+
     return _load_from_huggingface(sample)
 
 
@@ -209,6 +222,19 @@ def discover_single(image: str, task_id: str = "", problem: str = "") -> list[di
     }]
 
 
+def _task_to_record(task: Any) -> dict[str, Any]:
+    return {
+        "instance_id": task.instance_id,
+        "image": task.image,
+        "docker_image": task.image,
+        "problem_statement": task.problem_statement,
+        "repo": task.repo,
+        "base_commit": task.base_commit,
+        "hint_text": task.hint_text,
+        "environment": task.extra_env,
+    }
+
+
 def _derive_task_id(image: str) -> str:
     """Derive a task ID from a Docker image name.
 
@@ -258,6 +284,12 @@ def main() -> None:
         help="Output JSON file (default: swe-bench-tasks.json)",
     )
     parser.add_argument("--sample", type=int, default=0, help="Limit to first N tasks (0=all)")
+    parser.add_argument("--skip", type=int, default=0,
+                        help="Skip the first N selected tasks before --sample")
+    parser.add_argument("--instance-ids", default=None,
+                        help="Comma-separated instance IDs to include")
+    parser.add_argument("--repo", default=None,
+                        help="Only include tasks from this repo, e.g. django/django")
     parser.add_argument("--bench-root", default=None,
                         help="Path to agent-test-bench checkout")
     parser.add_argument("--images", default=None,
@@ -281,12 +313,22 @@ def main() -> None:
             os.getenv(DEFAULT_BENCH_ROOT_ENV, str(DEFAULT_BENCH_ROOT))
         )
         try:
-            tasks = discover_from_agent_test_bench(bench_root, sample=args.sample)
+            discovery_sample = (
+                args.sample
+                if args.sample > 0 and args.skip <= 0 and not args.repo and not args.instance_ids
+                else 0
+            )
+            tasks = discover_from_agent_test_bench(bench_root, sample=discovery_sample)
         except (FileNotFoundError, ImportError, RuntimeError) as exc:
             _log(f"[warn] Cannot load from agent-test-bench: {exc}")
             _log("[warn] Trying direct HuggingFace download...")
             try:
-                tasks = _load_from_huggingface(sample=args.sample)
+                discovery_sample = (
+                    args.sample
+                    if args.sample > 0 and args.skip <= 0 and not args.repo and not args.instance_ids
+                    else 0
+                )
+                tasks = _load_from_huggingface(sample=discovery_sample)
             except (ImportError, RuntimeError) as exc2:
                 _log(f"[error] {exc2}")
                 _log("[error] Cannot discover tasks. Options:")
@@ -299,6 +341,20 @@ def main() -> None:
         _log("No tasks discovered.")
         sys.exit(1)
 
+    task_defs = tasks_from_records(tasks)
+    task_defs = filter_tasks(
+        task_defs,
+        sample=args.sample,
+        skip=max(0, args.skip),
+        instance_ids=parse_instance_ids(args.instance_ids),
+        repo=args.repo,
+    )
+    tasks = [_task_to_record(task) for task in task_defs]
+
+    if not tasks:
+        _log("No tasks matched the requested filters.")
+        sys.exit(1)
+
     # Write output
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -309,7 +365,7 @@ def main() -> None:
     _log(f"Wrote {len(tasks)} tasks to {out_path}")
 
     # Print summary
-    print(f"\nDiscovered {len(tasks)} tasks → {out_path}")
+    print(f"\nDiscovered {len(tasks)} tasks -> {out_path}")
     for i, t in enumerate(tasks[:5]):
         iid = t.get("instance_id", "?")
         img = t.get("image", "?")
