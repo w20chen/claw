@@ -42,16 +42,30 @@ export function normalizeSandboxToolParams(
       delete normalized.elevated;
       changed = true;
     }
-    if (typeof normalized.workdir === "string") {
-      const mapped = mapWorkspacePath(normalized.workdir, hostWorkspace, containerAliases, containerWorkspace);
-      if (mapped !== normalized.workdir) {
-        normalized.workdir = mapped;
-        changed = true;
-      }
-    }
+    changed = normalizeExecWorkdirField(normalized, "cwd", hostWorkspace, containerAliases, containerWorkspace) || changed;
+    changed = normalizeExecWorkdirField(normalized, "workdir", hostWorkspace, containerAliases, containerWorkspace) || changed;
   }
 
   return {params: normalized, changed};
+}
+
+function normalizeExecWorkdirField(
+  params: Record<string, unknown>,
+  key: "cwd" | "workdir",
+  hostWorkspace: string,
+  containerAliases: string[],
+  containerWorkspace: string
+): boolean {
+  if (typeof params[key] === "string") {
+    const mapped = mapWorkspacePath(params[key], hostWorkspace, containerAliases, containerWorkspace);
+    if (mapped !== params[key]) {
+      params[key] = mapped;
+      return true;
+    }
+    return false;
+  }
+  params[key] = containerWorkspace;
+  return true;
 }
 
 function rewritePathFields(
