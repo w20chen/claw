@@ -6,6 +6,7 @@ from agent_scheduler.admission.leases import LeaseManager
 from agent_scheduler.config import SchedulerConfig
 from agent_scheduler.contracts.models import ResourceScope
 from agent_scheduler.executions import ExecutionRegistry
+from agent_scheduler.monitoring.docker_exec import DockerExecObserver
 from agent_scheduler.monitoring.tool_runtime import RealtimeToolMonitor
 from agent_scheduler.policies.base import SchedulingPolicy
 from agent_scheduler.policies.concurrency import ConcurrencyPolicy
@@ -23,6 +24,7 @@ class AppState:
     leases: LeaseManager
     policy: SchedulingPolicy
     tool_monitor: RealtimeToolMonitor
+    docker_exec_observer: DockerExecObserver | None
     executions: ExecutionRegistry
     metrics: Metrics
     topology: dict
@@ -51,6 +53,14 @@ def build_state(config: SchedulerConfig | None = None) -> AppState:
             poll_interval_s=max(0.01, cfg.resource_poll_interval_ms / 1000),
             max_timeline_points=max(1, cfg.resource_timeline_max_points),
         ),
+        docker_exec_observer=DockerExecObserver(
+            enabled=cfg.docker_exec_observer_enabled,
+            docker_socket=cfg.docker_socket,
+            container_id=cfg.sandbox_container_id,
+            container_prefix=cfg.docker_exec_container_prefix,
+        )
+        if cfg.docker_exec_observer_enabled
+        else None,
         executions=ExecutionRegistry(),
         metrics=Metrics(),
         topology=read_topology(),

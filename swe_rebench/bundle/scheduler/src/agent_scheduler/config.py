@@ -24,6 +24,9 @@ class SchedulerConfig:
     sandbox_cgroup_path: str | None = None
     sandbox_container_id: str | None = None
     sandbox_root_pid: int | None = None
+    docker_exec_observer_enabled: bool = False
+    docker_exec_container_prefix: str | None = None
+    docker_socket: str = "/var/run/docker.sock"
     llm_proxy_enabled: bool = True
     llm_proxy_upstream_base_url: str | None = None
     llm_proxy_upstream_api_key: str | None = None
@@ -58,6 +61,10 @@ class SchedulerConfig:
             sandbox_cgroup_path=os.getenv("AGENT_SCHEDULER_SANDBOX_CGROUP_PATH"),
             sandbox_container_id=os.getenv("AGENT_SCHEDULER_SANDBOX_CONTAINER_ID"),
             sandbox_root_pid=_optional_int(os.getenv("AGENT_SCHEDULER_SANDBOX_ROOT_PID")),
+            docker_exec_observer_enabled=os.getenv("AGENT_SCHEDULER_DOCKER_EXEC_OBSERVER", "false").lower()
+            in {"1", "true", "yes", "on"},
+            docker_exec_container_prefix=os.getenv("AGENT_SCHEDULER_DOCKER_EXEC_CONTAINER_PREFIX"),
+            docker_socket=os.getenv("AGENT_SCHEDULER_DOCKER_SOCKET", "/var/run/docker.sock"),
             llm_proxy_enabled=os.getenv("AGENT_SCHEDULER_LLM_PROXY_ENABLED", "true").lower()
             not in {"0", "false", "no"},
             llm_proxy_upstream_base_url=os.getenv(

@@ -386,6 +386,150 @@ def test_internal_tool_uses_docker_exec_inferred_scope_before_fallback(tmp_path:
     assert tool_end["resources"]["coverage_reason"] != "shared_sandbox_container"
 
 
+def test_internal_tool_overrides_shared_runtime_scope_with_docker_exec(tmp_path: Path) -> None:
+    runtime_cgroup = tmp_path / "runtime-cgroup"
+    inferred_cgroup = tmp_path / "inferred-cgroup"
+    _write_cgroup_fixture(runtime_cgroup, usage_usec=100_000)
+    _write_cgroup_fixture(inferred_cgroup, usage_usec=500_000)
+    trace_dir = tmp_path / "traces"
+    state = build_state(
+        SchedulerConfig(
+            trace_dir=trace_dir,
+            sandbox_cgroup_path=str(runtime_cgroup),
+            sandbox_container_id="sandbox-1",
+        )
+    )
+    state.docker_exec_observer = DockerExecObserver(
+        enabled=True,
+        container_id="sandbox-1",
+        autostart=False,
+    )
+    client = TestClient(create_app(state))
+    shared_runtime_scope = {
+        "kind": "cgroup-v2",
+        "execution_id": None,
+        "pid": os.getpid(),
+        "root_pid": os.getpid(),
+        "process_start_time": None,
+        "root_starttime_ticks": None,
+        "cgroup_path": str(runtime_cgroup),
+        "pid_namespace_inode": None,
+        "container_id": None,
+        "include_children": True,
+        "source": "openclaw-runtime",
+        "attribution_source": "shared-runtime-process",
+    }
+    request: dict[str, object] = {
+        "schema_version": "scheduler.v1",
+        "event_id": "evt-read-start",
+        "occurred_at": "2026-07-16T03:23:00Z",
+        "plugin_version": "0.1.0",
+        "run_id": "run-docker-exec",
+        "session_id": "session-docker-exec",
+        "session_key": None,
+        "agent_id": None,
+        "tool_call_id": "call-read",
+        "tool_name": "read",
+        "tool_kind": "file",
+        "tool_input_kind": "json",
+        "operation_hint": None,
+        "derived_paths": [],
+        "params_digest": "sha256:" + "a" * 64,
+        "param_features": {
+            "serialized_size_bytes": 10,
+            "string_length": 5,
+            "list_item_count": 0,
+            "path_count": 1,
+            "has_command_like_field": False,
+        },
+        "raw_params": {"path": "README.md"},
+        "resource_scope": shared_runtime_scope,
+    }
+    decision = client.post("/v1/decisions/tool", json=request).json()
+    state.docker_exec_observer.record_exec_start(
+        exec_id="exec-read-1",
+        container_id="sandbox-1",
+        pid=os.getpid(),
+        cgroup_path=str(inferred_cgroup),
+        command="sh -c openclaw-sandbox-fs read README.md",
+    )
+    (inferred_cgroup / "cpu.stat").write_text("usage_usec 700000\n", encoding="utf-8")
+    completion = {
+        "schema_version": "scheduler.v1",
+        "event_id": "evt-read-end",
+        "occurred_at": "2026-07-16T03:23:01Z",
+        "plugin_version": "0.1.0",
+        "run_id": "run-docker-exec",
+        "session_id": "session-docker-exec",
+        "session_key": None,
+        "agent_id": None,
+        "tool_call_id": "call-read",
+        "decision_id": decision["decision_id"],
+        "lease_id": decision["lease_id"],
+        "execution_id": None,
+        "tool_name": "read",
+        "duration_ms": 100,
+        "succeeded": True,
+        "error_type": None,
+        "error_digest": None,
+        "result_size_bytes": 4,
+        "raw_result": "data",
+        "resource_scope": shared_runtime_scope,
+    }
+
+    assert client.post("/v1/events/tool-completed", json=completion).json() == {"stored": True}
+
+    tool_end = [
+        record
+        for record in _read_trace_records(trace_dir)
+        if record.get("record_type") == "span_end" and record.get("kind") == "tool"
+    ][0]
+    assert tool_end["execution"]["cgroup_path"] == str(inferred_cgroup)
+    assert tool_end["execution"]["source"] == "docker-events"
+    assert tool_end["resources"]["attribution_source"] == "docker-exec-inferred"
+    assert tool_end["resources"]["coverage_reason"] != "shared_runtime_process"
+
+
+def test_docker_exec_event_uses_exec_id_attribute_not_container_id() -> None:
+    observer = DockerExecObserver(
+        enabled=True,
+        container_id="sandbox-1",
+        autostart=False,
+    )
+    inspected: list[str] = []
+
+    def inspect_exec(exec_id: str) -> dict[str, object]:
+        inspected.append(exec_id)
+        return {
+            "Pid": os.getpid(),
+            "ContainerID": "sandbox-1",
+            "ProcessConfig": {
+                "entrypoint": "sh",
+                "arguments": ["-c", "openclaw-sandbox-fs read README.md"],
+            },
+        }
+
+    observer._inspect_exec = inspect_exec  # type: ignore[method-assign]
+    observer._handle_event_line(
+        json.dumps(
+            {
+                "id": "sandbox-1",
+                "Actor": {
+                    "ID": "sandbox-1",
+                    "Attributes": {
+                        "execID": "exec-real-id",
+                        "container": "sandbox-1",
+                        "name": "claw-srb-test-1",
+                    },
+                },
+            }
+        )
+    )
+
+    assert inspected == ["exec-real-id"]
+    assert observer._records[0].exec_id == "exec-real-id"
+
+
 def test_exec_tool_can_use_shared_sandbox_cgroup_fallback(tmp_path: Path) -> None:
     cgroup = tmp_path / "cgroup"
     cgroup.mkdir()

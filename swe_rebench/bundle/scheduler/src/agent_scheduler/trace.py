@@ -209,9 +209,11 @@ class AgentTestBenchTraceWriter:
                 "payload_pid_start_time_ticks": scope.root_starttime_ticks if scope is not None else None,
                 "cgroup_path": scope.cgroup_path if scope is not None else None,
                 "pid_role": "payload_root" if has_pid else None,
+                "source": scope.source if scope is not None else None,
             },
             "resources": {
                 "attribution_status": _v6_attribution(sample, scope),
+                "attribution_source": scope.attribution_source if scope is not None else None,
                 "scope": "cgroup" if (scope is not None and scope.cgroup_path) else ("process_tree" if has_pid else "none"),
                 "quality": _v6_quality(sample.sampling_quality, _cov_reason),
                 "monitor_start_wall_time_ns": str(_mon_start_wall) if _mon_start_wall is not None else None,
