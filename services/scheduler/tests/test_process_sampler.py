@@ -36,6 +36,33 @@ def test_process_sampler_reads_cgroup_v2_scope(tmp_path) -> None:
     assert snapshot.target_pid == 123
 
 
+def test_process_sampler_reads_cgroup_v2_scope_without_pid(tmp_path) -> None:
+    (tmp_path / "cpu.stat").write_text("usage_usec 500000\n", encoding="utf-8")
+    (tmp_path / "memory.current").write_text("8192\n", encoding="utf-8")
+
+    snapshot = ProcessResourceSampler().snapshot(
+        ResourceScope(
+            kind="cgroup-v2",
+            execution_id=None,
+            pid=None,
+            root_pid=None,
+            process_start_time=None,
+            root_starttime_ticks=None,
+            cgroup_path=str(tmp_path),
+            pid_namespace_inode=None,
+            container_id="sandbox-1",
+            include_children=True,
+            source="openclaw-sandbox",
+            attribution_source="shared-sandbox-container",
+        )
+    )
+
+    assert snapshot.available is True
+    assert snapshot.source == "cgroup-v2"
+    assert snapshot.process_cpu_time_s == 0.5
+    assert snapshot.rss_bytes == 8192
+
+
 def test_cgroup_v2_requires_core_cgroup_metrics(tmp_path, monkeypatch) -> None:
     sampler = ProcessResourceSampler()
     monkeypatch.setattr(sampler, "_read_proc_net_dev", lambda _pid: (100, 200))

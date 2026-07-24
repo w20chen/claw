@@ -136,7 +136,9 @@ class AgentTestBenchTraceWriter:
             start.resource_scope if start is not None else None,
         )
         has_pid = scope is not None and scope.pid is not None
+        has_resource_scope = has_pid or (scope is not None and scope.cgroup_path is not None)
         shared_runtime = _is_shared_runtime_scope(scope)
+        shared_sandbox = _is_shared_sandbox_scope(scope)
 
         filepath = self._file_for_run(run_id, session_id, agent_id)
         self._ensure_metadata(filepath)
@@ -174,9 +176,10 @@ class AgentTestBenchTraceWriter:
             action_duration_ns=_action_dur_ns,
             monitor_start_wall_ns=_mon_start_wall,
             monitor_end_wall_ns=_mon_end_wall,
-            has_pid=has_pid,
-            internal_tool_no_process=event.execution_id is None and not has_pid,
+            has_pid=has_resource_scope,
+            internal_tool_no_process=event.execution_id is None and not has_resource_scope,
             shared_runtime_process=shared_runtime,
+            shared_sandbox_container=shared_sandbox,
         )
 
         # span_end
@@ -615,6 +618,7 @@ def _coverage(
     has_pid: bool,
     internal_tool_no_process: bool = False,
     shared_runtime_process: bool = False,
+    shared_sandbox_container: bool = False,
 ) -> tuple[int | None, float | None, str]:
     """Compute coverage duration, ratio, and reason.
 
@@ -638,7 +642,9 @@ def _coverage(
 
     ratio = overlap_ns / action_duration_ns
 
-    if shared_runtime_process and ratio > 0.0:
+    if shared_sandbox_container and ratio > 0.0:
+        reason = "shared_sandbox_container"
+    elif shared_runtime_process and ratio > 0.0:
         reason = "shared_runtime_process"
     elif ratio >= 0.99:
         reason = "full_window"
@@ -728,9 +734,18 @@ def _is_shared_runtime_scope(scope: Any | None) -> bool:
     )
 
 
+def _is_shared_sandbox_scope(scope: Any | None) -> bool:
+    if scope is None:
+        return False
+    return (
+        getattr(scope, "source", None) == "openclaw-sandbox"
+        or getattr(scope, "attribution_source", None) == "shared-sandbox-container"
+    )
+
+
 def _v6_attribution(sample: ToolRuntimeSample, scope: Any | None = None) -> str:
     """Map legacy attribution_status to v6 AttributionStatus."""
-    if _is_shared_runtime_scope(scope):
+    if _is_shared_runtime_scope(scope) or _is_shared_sandbox_scope(scope):
         return "partially_attributed"
     mapping = {
         "pid": "attributed",

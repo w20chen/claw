@@ -5,6 +5,12 @@
 # with an isolated trace output.
 
 # ── LLM Provider ──────────────────────────────────────────────────
+runtime:
+  # Default legacy mode: OpenClaw, plugin, and sidecar run inside each
+  # SWE-Rebench task container. Set to "host-openclaw-sandbox" to run
+  # OpenClaw on the host and use OpenClaw's Docker sandbox for tools.
+  mode: "container-openclaw"
+
 llm:
   # API key for the upstream LLM provider (required)
   # The sidecar proxies requests and records them, then forwards here.

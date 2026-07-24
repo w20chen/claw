@@ -91,6 +91,35 @@ python -m swe_rebench.runner run --config swe_rebench/config.yaml \
   --parallelism 2
 ```
 
+### Host OpenClaw Sandbox Mode
+
+The default mode is still `container-openclaw`: each SWE-Rebench task container
+runs OpenClaw, the plugin, and the scheduler sidecar inside the image.
+
+To keep OpenClaw on the host and use OpenClaw's Docker sandbox for tools:
+
+```bash
+python -m swe_rebench.runner run --config swe_rebench/config.yaml \
+  --runtime-mode host-openclaw-sandbox \
+  --dataset swe_rebench/tasks.json \
+  --sample 1 \
+  --parallelism 1 \
+  --export
+```
+
+This copies `/testbed` from the task image into a host workspace, starts a host
+sidecar, configures an isolated OpenClaw home for the task, and mounts the
+workspace into the OpenClaw sandbox at `/workspace`.
+
+Resource attribution is best-effort:
+
+- `exec` still uses the managed wrapper at `/workspace/.claw/bin/claw-launch`.
+- Internal tools such as `read`, `edit`, and `apply_patch` are sampled from the
+  shared sandbox container cgroup when it can be discovered.
+- Shared sandbox samples are marked
+  `coverage_reason: "shared_sandbox_container"` because they are container
+  time-window attribution, not exclusive per-tool PID attribution.
+
 ## Run One Task
 
 ```bash
@@ -131,5 +160,6 @@ python -m swe_rebench.runner collect --config swe_rebench/config.yaml
 | `--instance-ids a,b` | Run exact task IDs. |
 | `--repo owner/repo` | Filter by repo. |
 | `--parallelism N` | Run N containers concurrently. |
+| `--runtime-mode MODE` | Override `runtime.mode`; use `host-openclaw-sandbox` for host OpenClaw + OpenClaw Docker sandbox. |
 | `--export` | Copy traces to `swe_rebench/export`. |
 | `--dry-run` | Print selected tasks without starting containers. |

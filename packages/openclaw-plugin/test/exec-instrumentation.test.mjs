@@ -144,7 +144,9 @@ test("exec instrumentation drops shell startup env override keys", async () => {
 
 test("exec instrumentation forwards launcher cgroup environment", async () => {
   const previous = process.env.CLAW_CGROUP_ROOT;
+  const previousEndpoint = process.env.CLAW_SCHEDULER_ENDPOINT;
   process.env.CLAW_CGROUP_ROOT = "/sys/fs/cgroup/claw";
+  process.env.CLAW_SCHEDULER_ENDPOINT = "http://host.docker.internal:8765";
   const client = {
     async registerExecution() {
       return {one_time_token: "token-1"};
@@ -156,11 +158,17 @@ test("exec instrumentation forwards launcher cgroup environment", async () => {
     const result = await instrumentExecParams(event, {}, payload, decision, client, baseConfig);
 
     assert.equal(result.params.env.CLAW_CGROUP_ROOT, "/sys/fs/cgroup/claw");
+    assert.equal(result.params.env.CLAW_SCHEDULER_ENDPOINT, "http://host.docker.internal:8765");
   } finally {
     if (previous === undefined) {
       delete process.env.CLAW_CGROUP_ROOT;
     } else {
       process.env.CLAW_CGROUP_ROOT = previous;
+    }
+    if (previousEndpoint === undefined) {
+      delete process.env.CLAW_SCHEDULER_ENDPOINT;
+    } else {
+      process.env.CLAW_SCHEDULER_ENDPOINT = previousEndpoint;
     }
   }
 });

@@ -46,6 +46,8 @@ Coverage reasons distinguish attribution failures from expected shared scopes:
 - `internal_tool_no_process`: an in-process tool had no PID/cgroup scope.
 - `shared_runtime_process`: an internal tool was sampled through the shared
   OpenClaw runtime process, not a dedicated tool process.
+- `shared_sandbox_container`: an internal tool was sampled through the shared
+  OpenClaw Docker sandbox container cgroup, not a dedicated tool process.
 - `monitor_window_no_overlap`: a PID/cgroup existed, but the sampler did not
   capture an overlapping resource window.
 

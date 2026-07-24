@@ -39,12 +39,14 @@ class ProcessResourceSampler:
     def snapshot(self, scope: ResourceScope | None = None) -> ResourceSnapshot:
         now = time.time()
         mono = time.monotonic()
-        if scope is None or scope.pid is None:
+        if scope is None:
             return self._empty(now, mono, None, "unattributed")
         if scope.kind == "cgroup-v2" and scope.cgroup_path:
             cgroup = self._snapshot_cgroup(now, mono, scope)
             if cgroup.available:
                 return cgroup
+        if scope.pid is None:
+            return self._empty(now, mono, scope.root_pid, "pid-unavailable")
         if self._psutil is None:
             return self._empty(now, mono, scope.pid, "psutil-unavailable")
         try:

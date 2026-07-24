@@ -61,6 +61,7 @@ export type CoverageReason =
   | "pid_unavailable"
   | "internal_tool_no_process"
   | "shared_runtime_process"
+  | "shared_sandbox_container"
   | "monitor_window_no_overlap"
   | "not_applicable"
   | "cgroup_unavailable"

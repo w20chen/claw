@@ -45,6 +45,18 @@ def _trace_proxy_client(tmp_path: Path) -> tuple[TestClient, Path]:
     return TestClient(create_app(state)), trace_dir
 
 
+def _trace_client_with_sandbox_cgroup(tmp_path: Path, cgroup_path: Path) -> tuple[TestClient, Path]:
+    trace_dir = tmp_path / "traces"
+    state = build_state(
+        SchedulerConfig(
+            trace_dir=trace_dir,
+            sandbox_cgroup_path=str(cgroup_path),
+            sandbox_container_id="sandbox-1",
+        )
+    )
+    return TestClient(create_app(state)), trace_dir
+
+
 def _trace_proxy_client_with_debug(tmp_path: Path) -> tuple[TestClient, Path]:
     trace_dir = tmp_path / "traces"
     state = build_state(
@@ -200,6 +212,78 @@ def test_metrics_endpoint(tmp_path: Path) -> None:
     assert "scheduler_tool_net_tx_bytes_total" in response.text
     assert "scheduler_tool_io_write_bytes_per_second" in response.text
     assert "scheduler_tool_net_tx_bytes_per_second" in response.text
+
+
+def test_internal_tool_uses_shared_sandbox_cgroup_fallback(tmp_path: Path) -> None:
+    cgroup = tmp_path / "cgroup"
+    cgroup.mkdir()
+    (cgroup / "cpu.stat").write_text("usage_usec 100000\n", encoding="utf-8")
+    (cgroup / "memory.current").write_text("4096\n", encoding="utf-8")
+    (cgroup / "io.stat").write_text("8:0 rbytes=10 wbytes=20\n", encoding="utf-8")
+    (cgroup / "cgroup.procs").write_text("", encoding="utf-8")
+    client, trace_dir = _trace_client_with_sandbox_cgroup(tmp_path, cgroup)
+    request: dict[str, object] = {
+        "schema_version": "scheduler.v1",
+        "event_id": "evt-read-start",
+        "occurred_at": "2026-07-16T03:23:00Z",
+        "plugin_version": "0.1.0",
+        "run_id": "run-sandbox",
+        "session_id": "session-sandbox",
+        "session_key": None,
+        "agent_id": None,
+        "tool_call_id": "call-read",
+        "tool_name": "read",
+        "tool_kind": "file",
+        "tool_input_kind": "json",
+        "operation_hint": None,
+        "derived_paths": [],
+        "params_digest": "sha256:" + "a" * 64,
+        "param_features": {
+            "serialized_size_bytes": 10,
+            "string_length": 5,
+            "list_item_count": 0,
+            "path_count": 1,
+            "has_command_like_field": False,
+        },
+        "raw_params": {"path": "README.md"},
+        "resource_scope": None,
+    }
+    decision = client.post("/v1/decisions/tool", json=request).json()
+    (cgroup / "cpu.stat").write_text("usage_usec 200000\n", encoding="utf-8")
+    completion = {
+        "schema_version": "scheduler.v1",
+        "event_id": "evt-read-end",
+        "occurred_at": "2026-07-16T03:23:01Z",
+        "plugin_version": "0.1.0",
+        "run_id": "run-sandbox",
+        "session_id": "session-sandbox",
+        "session_key": None,
+        "agent_id": None,
+        "tool_call_id": "call-read",
+        "decision_id": decision["decision_id"],
+        "lease_id": decision["lease_id"],
+        "execution_id": None,
+        "tool_name": "read",
+        "duration_ms": 100,
+        "succeeded": True,
+        "error_type": None,
+        "error_digest": None,
+        "result_size_bytes": 4,
+        "raw_result": "data",
+        "resource_scope": None,
+    }
+
+    assert client.post("/v1/events/tool-completed", json=completion).json() == {"stored": True}
+
+    tool_end = [
+        record
+        for record in _read_trace_records(trace_dir)
+        if record.get("record_type") == "span_end" and record.get("kind") == "tool"
+    ][0]
+    assert tool_end["execution"]["cgroup_path"] == str(cgroup)
+    assert tool_end["resources"]["attribution_status"] == "partially_attributed"
+    assert tool_end["resources"]["scope"] == "cgroup"
+    assert tool_end["resources"]["coverage_reason"] == "shared_sandbox_container"
 
 
 def test_resource_timeline_uses_interval_rates() -> None:

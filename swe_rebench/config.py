@@ -32,6 +32,20 @@ def _as_bool(value: Any) -> bool:
 
 
 @dataclass
+class RuntimeConfig:
+    mode: str = "container-openclaw"
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "RuntimeConfig":
+        mode = str(d.get("mode", "container-openclaw"))
+        if mode not in {"container-openclaw", "host-openclaw-sandbox"}:
+            raise ValueError(
+                "runtime.mode must be 'container-openclaw' or 'host-openclaw-sandbox'"
+            )
+        return cls(mode=mode)
+
+
+@dataclass
 class LLMConfig:
     api_key: str = ""
     api_key_file: Path | None = None
@@ -150,6 +164,7 @@ class AgentConfig:
 
 @dataclass
 class RunnerConfig:
+    runtime: RuntimeConfig
     llm: LLMConfig
     docker: DockerConfig
     batch: BatchConfig
@@ -171,6 +186,7 @@ class RunnerConfig:
             repo_root = path.parent.resolve()
         raw = _load_yaml_safe(path)
         return cls(
+            runtime=RuntimeConfig.from_dict(raw.get("runtime", {})),
             llm=LLMConfig.from_dict(raw.get("llm", {}), repo_root),
             docker=DockerConfig.from_dict(raw.get("docker", {})),
             batch=BatchConfig.from_dict(raw.get("batch", {})),

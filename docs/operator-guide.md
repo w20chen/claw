@@ -101,6 +101,30 @@ openclaw agent --local --agent main --model "vllm/deepseek-v4-flash" \
   --message "Use the shell to run: python -c 'print(\"trace-ok\")'. Then summarize the result."
 ```
 
+## SWE-Rebench Host Sandbox Mode
+
+SWE-Rebench can also run with OpenClaw on the host while OpenClaw's Docker
+sandbox executes tools:
+
+```bash
+python -m swe_rebench.runner run --config swe_rebench/config.yaml \
+  --runtime-mode host-openclaw-sandbox \
+  --dataset swe_rebench/tasks.json \
+  --sample 1 \
+  --parallelism 1 \
+  --export
+```
+
+This mode exports `/testbed` from the task image into a host workspace, starts a
+host sidecar, creates an isolated OpenClaw home/config for the task, and mounts
+the workspace at `/workspace` inside the OpenClaw sandbox.
+
+`exec` remains managed by `claw-launch`. Internal tools are attributed to the
+shared sandbox container cgroup when the runner can discover it through
+`openclaw sandbox list --json` and Docker inspect. These spans use
+`coverage_reason: "shared_sandbox_container"` because this is sandbox container
+time-window attribution, not a strict per-tool PID/cgroup.
+
 ## 7. Inspect
 
 ```bash

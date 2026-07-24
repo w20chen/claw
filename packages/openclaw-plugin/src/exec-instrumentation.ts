@@ -183,7 +183,14 @@ function safeExecEnv(value: unknown): Record<string, unknown> {
 
 function launcherEnv(): Record<string, string> {
   const output: Record<string, string> = {};
-  for (const key of ["CLAW_CGROUP_ROOT", "CLAW_CGROUP_PATH", "CLAW_CGROUP_REQUIRED"]) {
+  for (const key of [
+    "CLAW_CGROUP_ROOT",
+    "CLAW_CGROUP_PATH",
+    "CLAW_CGROUP_REQUIRED",
+    "CLAW_ENABLE_CGROUP",
+    "CLAW_SCHEDULER_ENDPOINT",
+    "OPENCLAW_SCHEDULER_ENDPOINT",
+  ]) {
     const value = process.env[key];
     if (typeof value === "string" && value.length > 0) output[key] = value;
   }

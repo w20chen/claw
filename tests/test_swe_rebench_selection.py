@@ -4,10 +4,13 @@ import sys
 from pathlib import Path
 
 from swe_rebench.config import RunnerConfig
+from swe_rebench.docker import ContainerResult
+from swe_rebench.task_source import TaskDef
 from swe_rebench.prepare import _ENTRYPOINT_TEMPLATE, _PLUGIN_CONFIG, _write_entrypoint
 from swe_rebench.task_source import filter_tasks, parse_instance_ids, tasks_from_records
 from swe_rebench.runner import (
     _inspect_trace,
+    _run_one,
     _require_llm_api_key,
     _reset_task_trace_dir,
     _smoke_summary,
@@ -280,9 +283,87 @@ def test_entrypoint_installs_stable_launcher_path() -> None:
 def test_runner_config_enables_complete_cgroup_sampling() -> None:
     config = RunnerConfig.from_yaml("swe_rebench/config.yaml")
 
+    assert config.runtime.mode == "container-openclaw"
     assert config.docker.privileged is True
     assert config.docker.cgroupns_mode == "host"
     assert config.docker.cgroup_mount_rw is True
+
+
+def test_runner_config_parses_host_openclaw_sandbox_mode(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+runtime:
+  mode: "host-openclaw-sandbox"
+""",
+        encoding="utf-8",
+    )
+
+    config = RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
+
+    assert config.runtime.mode == "host-openclaw-sandbox"
+
+
+def test_runner_config_rejects_unknown_runtime_mode(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+runtime:
+  mode: "mystery"
+""",
+        encoding="utf-8",
+    )
+
+    try:
+        RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
+    except ValueError as exc:
+        assert "runtime.mode" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_run_one_dispatches_to_host_sandbox_runtime(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+runtime:
+  mode: "host-openclaw-sandbox"
+output:
+  trace_root: "traces"
+  report_path: "report.json"
+bundle:
+  output_dir: "bundle"
+""",
+        encoding="utf-8",
+    )
+    config = RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
+    task = TaskDef(instance_id="task-1", image="image:latest", problem_statement="fix")
+    called: dict[str, object] = {}
+
+    def fake_host_runner(**kwargs):
+        called.update(kwargs)
+        return ContainerResult(
+            task_id="task-1",
+            image="image:latest",
+            exit_code=0,
+            trace_dir=tmp_path / "traces" / "task-1",
+        )
+
+    import swe_rebench.runner as runner
+
+    monkeypatch.setattr(runner, "run_host_sandbox_task", fake_host_runner)
+
+    result = _run_one(
+        client=object(),
+        task=task,
+        bundle_dir=tmp_path / "bundle",
+        trace_dir=tmp_path / "traces" / "task-1",
+        config=config,
+    )
+
+    assert result.exit_code == 0
+    assert called["task"] == task
+    assert called["config"] == config
 
 
 def test_runner_config_parses_docker_bool_strings(tmp_path: Path) -> None:

@@ -1,0 +1,684 @@
+"""Host OpenClaw + OpenClaw Docker sandbox runner for SWE-Rebench.
+
+This mode keeps OpenClaw, the plugin, and the scheduler sidecar on the host.
+The SWE-Rebench task repository is copied out of the task image into a host
+workspace, then OpenClaw's own Docker sandbox executes tools against that
+workspace.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import threading
+import time
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+from swe_rebench.config import RunnerConfig
+from swe_rebench.docker import ContainerResult
+from swe_rebench.task_source import TaskDef
+
+
+def run_host_sandbox_task(
+    *,
+    task: TaskDef,
+    trace_dir: Path,
+    config: RunnerConfig,
+    bundle_dir: Path,
+) -> ContainerResult:
+    """Run one task with host OpenClaw and OpenClaw Docker sandbox."""
+    started = time.monotonic()
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    workspace = _task_workspace(config, task)
+    openclaw_home = trace_dir / "openclaw-home"
+    sidecar_port = _free_port()
+    sidecar = None
+    exit_code = -1
+    error: str | None = None
+
+    try:
+        _reset_directory(workspace)
+        _reset_directory(openclaw_home)
+        _export_testbed_from_image(task.image, workspace, config.docker.pull_policy)
+        _install_sandbox_launcher(workspace, bundle_dir)
+        _write_task_inputs(trace_dir, task, config, workspace)
+
+        sidecar = _start_sidecar(
+            trace_dir=trace_dir,
+            port=sidecar_port,
+            config=config,
+            tool_profiles=config.repo_root / config.bundle.tool_profiles,
+        )
+        _configure_openclaw(
+            trace_dir=trace_dir,
+            openclaw_home=openclaw_home,
+            sidecar_port=sidecar_port,
+            workspace=workspace,
+            config=config,
+        )
+        exit_code = _run_openclaw_agent(
+            trace_dir=trace_dir,
+            openclaw_home=openclaw_home,
+            workspace=workspace,
+            sidecar_port=sidecar_port,
+            task=task,
+            config=config,
+        )
+        _collect_patch(trace_dir, workspace, task)
+    except Exception as exc:
+        error = str(exc)
+        _write_text(trace_dir / "host_sandbox_error.txt", error + "\n")
+    finally:
+        if sidecar is not None:
+            _stop_process(sidecar)
+        _write_result_summary(trace_dir, task, workspace, exit_code, error)
+
+    return ContainerResult(
+        task_id=task.instance_id,
+        image=task.image,
+        exit_code=exit_code,
+        error=error,
+        trace_dir=trace_dir,
+        trace_files=sorted(trace_dir.glob("*.jsonl")),
+        duration_seconds=time.monotonic() - started,
+    )
+
+
+def _task_workspace(config: RunnerConfig, task: TaskDef) -> Path:
+    safe_id = task.instance_id.replace("/", "_").replace(":", "_")
+    return config.output.trace_root.parent / "workspaces" / safe_id
+
+
+def _export_testbed_from_image(image: str, workspace: Path, pull_policy: str) -> None:
+    docker = _require_executable("docker")
+    if pull_policy != "never":
+        pull = [docker, "pull", image]
+        if pull_policy == "missing":
+            inspect = subprocess.run(
+                [docker, "image", "inspect", image],
+                capture_output=True,
+                text=True,
+            )
+            if inspect.returncode == 0:
+                pull = []
+        if pull:
+            _run_checked(pull, "docker_pull")
+
+    create = subprocess.run(
+        [docker, "create", image],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    container_id = create.stdout.strip()
+    try:
+        _run_checked([docker, "cp", f"{container_id}:/testbed/.", str(workspace)], "docker_cp_testbed")
+    finally:
+        subprocess.run([docker, "rm", "-f", container_id], capture_output=True, text=True)
+
+
+def _install_sandbox_launcher(workspace: Path, bundle_dir: Path) -> None:
+    scheduler_src = bundle_dir / "scheduler" / "src"
+    target_src = workspace / ".claw" / "scheduler" / "src"
+    target_bin = workspace / ".claw" / "bin"
+    if not scheduler_src.exists():
+        raise FileNotFoundError(f"scheduler source not found in bundle: {scheduler_src}")
+    if target_src.parent.exists():
+        shutil.rmtree(target_src.parent)
+    shutil.copytree(scheduler_src, target_src)
+    target_bin.mkdir(parents=True, exist_ok=True)
+    launcher = target_bin / "claw-launch"
+    launcher.write_text(
+        "#!/bin/sh\n"
+        "export PYTHONPATH=\"/workspace/.claw/scheduler/src${PYTHONPATH:+:$PYTHONPATH}\"\n"
+        "exec python3 -m agent_scheduler.launcher \"$@\"\n",
+        encoding="utf-8",
+    )
+    launcher.chmod(launcher.stat().st_mode | 0o111)
+
+
+def _start_sidecar(
+    *,
+    trace_dir: Path,
+    port: int,
+    config: RunnerConfig,
+    tool_profiles: Path,
+) -> subprocess.Popen[str]:
+    env = os.environ.copy()
+    env.update(
+        {
+            "PYTHONPATH": str(config.repo_root / "services" / "scheduler" / "src"),
+            "AGENT_SCHEDULER_DB_PATH": str(trace_dir / "scheduler.sqlite3"),
+            "AGENT_SCHEDULER_TRACE_DIR": str(trace_dir),
+            "AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL": config.llm.upstream_base_url,
+            "AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY": config.llm.api_key,
+            "AGENT_SCHEDULER_LLM_PROXY_ENABLED": "true",
+            "AGENT_SCHEDULER_LLM_PROXY_EXPOSE_MODEL": config.llm.model,
+            "AGENT_SCHEDULER_LLM_PROXY_UPSTREAM_MODEL": config.llm.model,
+            "AGENT_SCHEDULER_POLICY": "observe-only",
+            "AGENT_SCHEDULER_TOOL_PROFILES": str(tool_profiles),
+        }
+    )
+    stdout = (trace_dir / "sidecar-stdout.txt").open("w", encoding="utf-8")
+    stderr = (trace_dir / "sidecar-stderr.txt").open("w", encoding="utf-8")
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "agent_scheduler.main",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            str(port),
+        ],
+        cwd=str(config.repo_root / "services" / "scheduler"),
+        env=env,
+        stdout=stdout,
+        stderr=stderr,
+        text=True,
+    )
+    _wait_ready(port)
+    return process
+
+
+def _configure_openclaw(
+    *,
+    trace_dir: Path,
+    openclaw_home: Path,
+    sidecar_port: int,
+    workspace: Path,
+    config: RunnerConfig,
+) -> None:
+    openclaw = _require_executable("openclaw")
+    env = _openclaw_env(openclaw_home, sidecar_port, config)
+    endpoint_host = f"http://127.0.0.1:{sidecar_port}"
+    endpoint_sandbox = f"http://host.docker.internal:{sidecar_port}"
+    sandbox_config = _openclaw_config(
+        endpoint_host=endpoint_host,
+        endpoint_sandbox=endpoint_sandbox,
+        workspace=workspace,
+        config=config,
+    )
+
+    phase_log = trace_dir / "phase3.log"
+    with phase_log.open("w", encoding="utf-8") as log:
+        _run_logged(
+            [
+                openclaw,
+                "onboard",
+                "--non-interactive",
+                "--accept-risk",
+                "--skip-health",
+                "--mode",
+                "local",
+                "--auth-choice",
+                "vllm",
+                "--custom-base-url",
+                f"{endpoint_host}/v1",
+                "--custom-api-key",
+                config.llm.api_key,
+                "--custom-model-id",
+                config.llm.model,
+            ],
+            env,
+            log,
+            "openclaw_onboard",
+        )
+        _run_logged([openclaw, "plugins", "install", "--link", str(config.repo_root / config.bundle.plugin_source)], env, log, "plugin_install")
+        _run_logged([openclaw, "plugins", "enable", "hardware-scheduler"], env, log, "plugin_enable")
+        patch = subprocess.run(
+            [openclaw, "config", "patch", "--stdin"],
+            input=sandbox_config,
+            stdout=log,
+            stderr=log,
+            text=True,
+            env=env,
+        )
+        if patch.returncode != 0:
+            raise RuntimeError(f"openclaw_config_patch_failed exit={patch.returncode}")
+
+
+def _run_openclaw_agent(
+    *,
+    trace_dir: Path,
+    openclaw_home: Path,
+    workspace: Path,
+    sidecar_port: int,
+    task: TaskDef,
+    config: RunnerConfig,
+) -> int:
+    openclaw = _require_executable("openclaw")
+    env = _openclaw_env(openclaw_home, sidecar_port, config)
+    env.update(
+        {
+            "TASK_INSTANCE_ID": task.instance_id,
+            "CLAW_SCHEDULER_ENDPOINT": f"http://host.docker.internal:{sidecar_port}",
+            "CLAW_ENABLE_CGROUP": "1",
+        }
+    )
+    prompt_path = trace_dir / "agent_prompt.txt"
+    stdout = (trace_dir / "agent-stdout.txt").open("w", encoding="utf-8")
+    stderr = (trace_dir / "agent-stderr.txt").open("w", encoding="utf-8")
+    stop_discovery = threading.Event()
+    discovery = threading.Thread(
+        target=_discover_sandbox_scope_loop,
+        kwargs={
+            "trace_dir": trace_dir,
+            "openclaw_home": openclaw_home,
+            "sidecar_port": sidecar_port,
+            "config": config,
+            "stop_event": stop_discovery,
+        },
+        daemon=True,
+    )
+    discovery.start()
+    process = subprocess.Popen(
+        [
+            openclaw,
+            "agent",
+            "--local",
+            "--agent",
+            "main",
+            "--model",
+            config.llm.openclaw_model_ref,
+            "--message-file",
+            str(prompt_path),
+            *config.agent.extra_args,
+        ],
+        cwd=str(workspace),
+        env=env,
+        stdout=stdout,
+        stderr=stderr,
+        text=True,
+    )
+    try:
+        return process.wait(
+            timeout=config.batch.task_timeout_seconds if config.batch.task_timeout_seconds > 0 else None
+        )
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+        return 124
+    finally:
+        stop_discovery.set()
+        discovery.join(timeout=2)
+
+
+def _openclaw_config(
+    *,
+    endpoint_host: str,
+    endpoint_sandbox: str,
+    workspace: Path,
+    config: RunnerConfig,
+) -> str:
+    escaped_workspace = str(workspace.resolve()).replace("\\", "\\\\")
+    escaped_plugin = str(config.repo_root / config.bundle.plugin_source).replace("\\", "\\\\")
+    return json.dumps(
+        {
+            "agents": {
+                "defaults": {
+                    "sandbox": {
+                        "mode": "all",
+                        "backend": "docker",
+                        "scope": "session",
+                        "workspaceAccess": "rw",
+                        "docker": {
+                            "network": "bridge",
+                            "binds": [f"{escaped_workspace}:/workspace:rw"],
+                            "dangerouslyAllowExternalBindSources": True,
+                        },
+                    },
+                },
+            },
+            "plugins": {
+                "entries": {
+                    "hardware-scheduler": {
+                        "enabled": True,
+                        "config": {
+                            "endpoint": endpoint_host,
+                            "mode": "observe",
+                            "decisionTimeoutMs": 800,
+                            "reportTimeoutMs": 800,
+                            "failOpen": True,
+                            "sendRawParams": False,
+                            "recordRawTrace": False,
+                            "authTokenEnv": "OPENCLAW_SCHEDULER_TOKEN",
+                            "logLevel": "info",
+                            "executionBackend": "managed-wrapper",
+                            "launcherPath": "/workspace/.claw/bin/claw-launch",
+                            "instrumentHosts": ["gateway", "*"],
+                            "instrumentTools": ["exec"],
+                            "enableCgroup": True,
+                            "enableAffinity": False,
+                            "enableNuma": False,
+                            "profilingMode": "off",
+                            "securityBoundaryAccepted": True,
+                            "trace": {
+                                "schema_version": 6,
+                                "include_raw_events": False,
+                                "include_llm_messages": True,
+                                "include_tool_outputs": True,
+                                "redact_sensitive_data": True,
+                                "flush_span_start": True,
+                                "max_string_bytes": 16384,
+                                "max_messages_bytes": 131072,
+                                "max_tool_output_bytes": 65536,
+                                "trace_dir": "",
+                            },
+                        },
+                    },
+                },
+            },
+            "env": {
+                "CLAW_SCHEDULER_ENDPOINT": endpoint_sandbox,
+            },
+            "sweRebench": {
+                "runtimeMode": "host-openclaw-sandbox",
+                "pluginSource": escaped_plugin,
+            },
+        },
+        indent=2,
+    )
+
+
+def _openclaw_env(openclaw_home: Path, sidecar_port: int, config: RunnerConfig) -> dict[str, str]:
+    env = os.environ.copy()
+    env.update(
+        {
+            "OPENCLAW_HOME": str(openclaw_home),
+            "OPENCLAW_STATE_DIR": str(openclaw_home / ".openclaw"),
+            "OPENCLAW_CONFIG_PATH": str(openclaw_home / ".openclaw" / "openclaw.json"),
+            "VLLM_API_KEY": config.llm.api_key or "sk-test",
+            "LLM_API_KEY": config.llm.api_key,
+            "CLAW_SCHEDULER_ENDPOINT": f"http://host.docker.internal:{sidecar_port}",
+        }
+    )
+    (openclaw_home / ".openclaw").mkdir(parents=True, exist_ok=True)
+    return env
+
+
+def _discover_sandbox_scope_loop(
+    *,
+    trace_dir: Path,
+    openclaw_home: Path,
+    sidecar_port: int,
+    config: RunnerConfig,
+    stop_event: threading.Event,
+) -> None:
+    openclaw = shutil.which("openclaw") or shutil.which("openclaw.cmd")
+    docker = shutil.which("docker") or shutil.which("docker.cmd")
+    if openclaw is None or docker is None:
+        return
+    env = _openclaw_env(openclaw_home, sidecar_port, config)
+    seen: set[str] = set()
+    while not stop_event.is_set():
+        try:
+            container_ids = _openclaw_sandbox_container_ids(openclaw, env)
+            for container_id in container_ids:
+                if container_id in seen:
+                    continue
+                scope = _docker_container_scope(docker, container_id)
+                if scope is None:
+                    continue
+                _post_sandbox_scope(sidecar_port, scope)
+                seen.add(container_id)
+                _write_text(
+                    trace_dir / "sandbox_scope.json",
+                    json.dumps(scope, indent=2) + "\n",
+                )
+        except Exception as exc:
+            _write_text(trace_dir / "sandbox_scope_discovery_last_error.txt", str(exc) + "\n")
+        stop_event.wait(1.0)
+
+
+def _openclaw_sandbox_container_ids(openclaw: str, env: dict[str, str]) -> list[str]:
+    result = subprocess.run(
+        [openclaw, "sandbox", "list", "--json"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return []
+    try:
+        parsed = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return []
+    ids: list[str] = []
+    for item in _walk_dicts(parsed):
+        for key in ("container_id", "containerId", "container", "id"):
+            value = item.get(key)
+            if isinstance(value, str) and _looks_like_container_id(value):
+                ids.append(value)
+                break
+    return list(dict.fromkeys(ids))
+
+
+def _docker_container_scope(docker: str, container_id: str) -> dict[str, Any] | None:
+    result = subprocess.run(
+        [docker, "inspect", "-f", "{{.State.Pid}}", container_id],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        root_pid = int(result.stdout.strip())
+    except ValueError:
+        return None
+    cgroup_path = _read_host_cgroup_path(root_pid)
+    if cgroup_path is None:
+        return None
+    return {
+        "kind": "cgroup-v2",
+        "execution_id": None,
+        "pid": root_pid,
+        "root_pid": root_pid,
+        "process_start_time": None,
+        "root_starttime_ticks": None,
+        "cgroup_path": cgroup_path,
+        "pid_namespace_inode": None,
+        "container_id": container_id,
+        "include_children": True,
+        "source": "openclaw-sandbox",
+        "attribution_source": "shared-sandbox-container",
+    }
+
+
+def _read_host_cgroup_path(pid: int) -> str | None:
+    try:
+        text = Path(f"/proc/{pid}/cgroup").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        if not line.startswith("0::"):
+            continue
+        path = line[3:]
+        if not path or path == "/":
+            return "/sys/fs/cgroup"
+        return f"/sys/fs/cgroup{path}"
+    return None
+
+
+def _post_sandbox_scope(sidecar_port: int, scope: dict[str, Any]) -> None:
+    data = json.dumps(scope).encode("utf-8")
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{sidecar_port}/v1/runtime/sandbox-scope",
+        data=data,
+        method="POST",
+        headers={"content-type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=2):
+        pass
+
+
+def _walk_dicts(value: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    if isinstance(value, dict):
+        out.append(value)
+        for item in value.values():
+            out.extend(_walk_dicts(item))
+    elif isinstance(value, list):
+        for item in value:
+            out.extend(_walk_dicts(item))
+    return out
+
+
+def _looks_like_container_id(value: str) -> bool:
+    stripped = value.strip()
+    return len(stripped) >= 12 and all(ch.isalnum() or ch in {"_", "-", "."} for ch in stripped)
+
+
+def _write_task_inputs(trace_dir: Path, task: TaskDef, config: RunnerConfig, workspace: Path) -> None:
+    prompt = (
+        "You are running a SWE-Rebench task in an OpenClaw Docker sandbox.\n\n"
+        "Goal: solve the task by editing the repository mounted at /workspace.\n\n"
+        "Workflow:\n"
+        "1. Inspect the repository.\n"
+        "2. Edit the source files needed for a minimal fix.\n"
+        "3. Run relevant tests or a focused reproduction command.\n"
+        "4. Leave the repository modified with your solution.\n\n"
+        f"Task instance:\n{task.instance_id}\n\n"
+        f"Problem statement:\n{task.problem_statement}\n"
+    )
+    if task.hint_text:
+        prompt += f"\nHint:\n{task.hint_text}\n"
+    _write_text(trace_dir / "agent_prompt.txt", prompt)
+    _write_text(trace_dir / "agent-cwd.txt", str(workspace) + "\n")
+    _write_text(
+        trace_dir / "task_manifest.json",
+        json.dumps(
+            {
+                "task_id": task.instance_id,
+                "image": task.image,
+                "base_commit": task.base_commit,
+                "model": config.llm.model,
+                "openclaw_model_ref": config.llm.openclaw_model_ref,
+                "runtime_mode": "host-openclaw-sandbox",
+                "workspace": str(workspace),
+                "problem_statement_bytes": len(task.problem_statement),
+                "hint_text_bytes": len(task.hint_text),
+            },
+            indent=2,
+        )
+        + "\n",
+    )
+
+
+def _collect_patch(trace_dir: Path, workspace: Path, task: TaskDef) -> None:
+    status = subprocess.run(
+        ["git", "-C", str(workspace), "status", "--short"],
+        capture_output=True,
+        text=True,
+    )
+    diff_stat = subprocess.run(
+        ["git", "-C", str(workspace), "diff", "--stat"],
+        capture_output=True,
+        text=True,
+    )
+    _write_text(
+        trace_dir / "repo_status.txt",
+        "=== host workspace ===\n"
+        f"{workspace}\n\n"
+        "=== git status ===\n"
+        f"{status.stdout}{status.stderr}\n"
+        "=== git diff --stat ===\n"
+        f"{diff_stat.stdout}{diff_stat.stderr}\n",
+    )
+    diff_cmd = ["git", "-C", str(workspace), "diff"]
+    if task.base_commit:
+        diff_cmd.append(task.base_commit)
+    diff_cmd.append("--")
+    patch = subprocess.run(diff_cmd, capture_output=True, text=True)
+    _write_text(trace_dir / "model.patch", patch.stdout)
+
+
+def _write_result_summary(
+    trace_dir: Path,
+    task: TaskDef,
+    workspace: Path,
+    exit_code: int,
+    error: str | None,
+) -> None:
+    patch = trace_dir / "model.patch"
+    patch_bytes = patch.stat().st_size if patch.exists() else 0
+    summary: dict[str, Any] = {
+        "task_id": task.instance_id,
+        "agent_exit_code": exit_code,
+        "testbed_exists": workspace.exists(),
+        "patch_bytes": patch_bytes,
+        "has_patch": patch_bytes > 0,
+        "runtime_mode": "host-openclaw-sandbox",
+    }
+    if error is not None:
+        summary["error"] = error
+    _write_text(trace_dir / "result_summary.json", json.dumps(summary, indent=2) + "\n")
+
+
+def _wait_ready(port: int) -> None:
+    deadline = time.monotonic() + 60
+    url = f"http://127.0.0.1:{port}/health/ready"
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=1) as response:
+                if response.status == 200:
+                    return
+        except Exception:
+            time.sleep(0.5)
+    raise RuntimeError(f"sidecar_not_ready port={port}")
+
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _reset_directory(path: Path) -> None:
+    if path.exists():
+        shutil.rmtree(path)
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def _write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _require_executable(name: str) -> str:
+    found = shutil.which(name) or shutil.which(f"{name}.cmd")
+    if found is None:
+        raise FileNotFoundError(f"required executable not found: {name}")
+    return found
+
+
+def _run_checked(cmd: list[str], label: str) -> None:
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"{label}_failed exit={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+
+
+def _run_logged(cmd: list[str], env: dict[str, str], log: Any, label: str) -> None:
+    log.write(f"=== {label} ===\n")
+    result = subprocess.run(cmd, stdout=log, stderr=log, text=True, env=env)
+    log.write(f"\nexit={result.returncode}\n\n")
+    if result.returncode != 0:
+        raise RuntimeError(f"{label}_failed exit={result.returncode}")
+
+
+def _stop_process(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()

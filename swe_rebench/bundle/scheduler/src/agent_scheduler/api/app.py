@@ -17,6 +17,7 @@ from agent_scheduler.contracts.models import (
     ExecutionUpdateResponse,
     ModelEvent,
     PlacementAdvice,
+    ResourceScope,
     StatusResponse,
     ToolBeforeRequest,
     ToolCompletedEvent,
@@ -52,6 +53,42 @@ def create_app(state: AppState | None = None) -> FastAPI:
     def auth(s: AppState = Depends(get_state)) -> None:
         verify_bearer(s.config.auth_token)
 
+    def sandbox_fallback_scope(s: AppState) -> ResourceScope | None:
+        if s._sandbox_scope_override is not None:
+            return s._sandbox_scope_override
+        if not s.config.sandbox_cgroup_path:
+            return None
+        return ResourceScope(
+            kind="cgroup-v2",
+            execution_id=None,
+            pid=s.config.sandbox_root_pid,
+            root_pid=s.config.sandbox_root_pid,
+            cgroup_path=s.config.sandbox_cgroup_path,
+            container_id=s.config.sandbox_container_id,
+            include_children=True,
+            source="openclaw-sandbox",
+            attribution_source="shared-sandbox-container",
+        )
+
+    def with_sandbox_fallback(request: ToolBeforeRequest, s: AppState) -> ToolBeforeRequest:
+        if request.resource_scope is not None or request.tool_name == "exec":
+            return request
+        scope = sandbox_fallback_scope(s)
+        if scope is None:
+            return request
+        return request.model_copy(update={"resource_scope": scope})
+
+    def completed_with_sandbox_fallback(
+        event: ToolCompletedEvent,
+        s: AppState,
+    ) -> ToolCompletedEvent:
+        if event.resource_scope is not None or event.tool_name == "exec":
+            return event
+        scope = sandbox_fallback_scope(s)
+        if scope is None:
+            return event
+        return event.model_copy(update={"resource_scope": scope})
+
     @app.get("/health/live")
     async def live() -> dict[str, bool]:
         return {"live": True}
@@ -79,6 +116,15 @@ def create_app(state: AppState | None = None) -> FastAPI:
     ) -> dict[str, object]:
         return {"samples": s._recent_samples[:limit]}
 
+    @app.post("/v1/runtime/sandbox-scope")
+    async def update_sandbox_scope(
+        scope: ResourceScope,
+        s: AppState = Depends(get_state),
+        _: None = Depends(auth),
+    ) -> dict[str, bool]:
+        s._sandbox_scope_override = scope
+        return {"stored": True}
+
     @app.get("/v1/models")
     @app.get("/models")
     async def llm_proxy_models(
@@ -101,6 +147,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
         s: AppState = Depends(get_state),
         _: None = Depends(auth),
     ):
+        request = with_sandbox_fallback(request, s)
         start = time.monotonic()
         s.metrics.inc("scheduler_tool_requests_total")
         if s.trace_writer is not None:
@@ -122,6 +169,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
         s: AppState = Depends(get_state),
         _: None = Depends(auth),
     ) -> dict[str, bool]:
+        event = completed_with_sandbox_fallback(event, s)
         # Dedup: reject duplicate tool completions (same event_id)
         if event.event_id in s._completed_tool_event_ids:
             return {"stored": False}

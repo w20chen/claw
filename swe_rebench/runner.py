@@ -44,6 +44,7 @@ from typing import Any
 
 from swe_rebench.config import RunnerConfig
 from swe_rebench.docker import ContainerResult, get_docker_client, pull_image, run_container
+from swe_rebench.host_sandbox import run_host_sandbox_task
 from swe_rebench.prepare import build_bundle
 from swe_rebench.task_source import (
     TaskDef,
@@ -392,6 +393,14 @@ def _run_one(
     config: RunnerConfig,
 ) -> ContainerResult:
     """Execute a single task container (called in worker thread)."""
+    if config.runtime.mode == "host-openclaw-sandbox":
+        return run_host_sandbox_task(
+            task=task,
+            trace_dir=trace_dir,
+            config=config,
+            bundle_dir=bundle_dir,
+        )
+
     retries = config.batch.retry_failed + 1
     last_result: ContainerResult | None = None
     _reset_task_trace_dir(config.output.trace_root, trace_dir)
@@ -647,6 +656,9 @@ def main() -> None:
                        help="Run only tasks whose repo field matches this value")
     run_p.add_argument("--parallelism", type=int, default=None,
                        help="Override parallelism from config")
+    run_p.add_argument("--runtime-mode", default=None,
+                       choices=("container-openclaw", "host-openclaw-sandbox"),
+                       help="Override runtime mode from config")
     run_p.add_argument("--export", action="store_true",
                        help="Export traces to flat directory after run")
     run_p.add_argument("--dry-run", action="store_true",
@@ -681,6 +693,8 @@ def main() -> None:
     if args.command == "run":
         if args.parallelism is not None:
             config.batch.parallelism = args.parallelism
+        if args.runtime_mode is not None:
+            config.runtime.mode = args.runtime_mode
 
         # Build bundle if requested
         bundle_dir = repo_root / config.bundle.output_dir

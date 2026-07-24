@@ -21,6 +21,9 @@ class SchedulerConfig:
     trace_max_messages_bytes: int = 131_072  # 128 KiB, matches plugin default
     resource_poll_interval_ms: int = 50
     resource_timeline_max_points: int = 2_000
+    sandbox_cgroup_path: str | None = None
+    sandbox_container_id: str | None = None
+    sandbox_root_pid: int | None = None
     llm_proxy_enabled: bool = True
     llm_proxy_upstream_base_url: str | None = None
     llm_proxy_upstream_api_key: str | None = None
@@ -52,6 +55,9 @@ class SchedulerConfig:
             trace_max_messages_bytes=int(os.getenv("AGENT_SCHEDULER_TRACE_MAX_MESSAGES_BYTES", "131072")),
             resource_poll_interval_ms=int(os.getenv("AGENT_SCHEDULER_RESOURCE_POLL_INTERVAL_MS", "50")),
             resource_timeline_max_points=int(os.getenv("AGENT_SCHEDULER_RESOURCE_TIMELINE_MAX_POINTS", "2000")),
+            sandbox_cgroup_path=os.getenv("AGENT_SCHEDULER_SANDBOX_CGROUP_PATH"),
+            sandbox_container_id=os.getenv("AGENT_SCHEDULER_SANDBOX_CONTAINER_ID"),
+            sandbox_root_pid=_optional_int(os.getenv("AGENT_SCHEDULER_SANDBOX_ROOT_PID")),
             llm_proxy_enabled=os.getenv("AGENT_SCHEDULER_LLM_PROXY_ENABLED", "true").lower()
             not in {"0", "false", "no"},
             llm_proxy_upstream_base_url=os.getenv(
@@ -122,3 +128,13 @@ def _path_from_env(name: str, default: str, base: Path) -> Path:
 def _resolve_path(value: str, base: Path) -> Path:
     path = Path(value).expanduser()
     return path if path.is_absolute() else base / path
+
+
+def _optional_int(value: str | None) -> int | None:
+    if value is None or value.strip() == "":
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        return None
+    return parsed if parsed >= 0 else None
