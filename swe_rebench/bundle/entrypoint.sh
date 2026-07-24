@@ -128,6 +128,11 @@ echo "=== Phase 3 done ==="
 echo "[claw] === Phase 4: run agent ==="
 AGENT_EXIT=0
 openclaw agent --help 2>&1 > "$TRACE_DIR/agent-help.txt" || true
+AGENT_CWD="$CLAW_ROOT/scheduler"
+if [ -d /testbed ]; then
+    AGENT_CWD="/testbed"
+fi
+echo "$AGENT_CWD" > "$TRACE_DIR/agent-cwd.txt"
 
 if [ -n "${PROBLEM_STATEMENT:-}" ]; then
     cat > /tmp/problem_statement.txt <<'EOF_PROMPT'
@@ -140,11 +145,14 @@ Important paths:
 - Trace and smoke-test artifacts are written under /traces.
 
 Workflow:
-1. Inspect the repository and understand the bug.
+1. Start by inspecting the repository with shell/file tools.
 2. Edit the source files needed for a minimal fix.
 3. Run relevant tests or a focused reproduction command.
 4. Leave the repository modified with your solution. Do not only explain the fix.
 5. If you cannot finish, write down exactly what blocked you.
+
+Do not stop after a prose answer. A useful smoke-test run should leave either
+a code diff in /testbed or a clear blocker in your final answer.
 
 Task instance:
 EOF_PROMPT
@@ -155,15 +163,20 @@ EOF_PROMPT
         printf '%s\n%s\n\n' "Hint:" "$TASK_HINT_TEXT" >> /tmp/problem_statement.txt
     fi
     cp /tmp/problem_statement.txt "$TRACE_DIR/agent_prompt.txt"
-    echo "[claw] running: openclaw agent --local --agent main --model $OPENCLAW_MODEL_REF ..."
-    openclaw agent --local \
-        --agent main \
-        --model "$OPENCLAW_MODEL_REF" \
-        --message-file /tmp/problem_statement.txt \
-        2>"$TRACE_DIR/agent-stderr.txt" || AGENT_EXIT=$?
+    echo "[claw] running in $AGENT_CWD: openclaw agent --local --agent main --model $OPENCLAW_MODEL_REF ..."
+    (
+        cd "$AGENT_CWD"
+        openclaw agent --local \
+            --agent main \
+            --model "$OPENCLAW_MODEL_REF" \
+            --message-file /tmp/problem_statement.txt
+    ) >"$TRACE_DIR/agent-stdout.txt" 2>"$TRACE_DIR/agent-stderr.txt" || AGENT_EXIT=$?
 else
     echo "[claw] WARNING: PROBLEM_STATEMENT not set"
-    bash "$CLAW_ROOT/run_agent.sh" || AGENT_EXIT=$?
+    (
+        cd "$AGENT_CWD"
+        bash "$CLAW_ROOT/run_agent.sh"
+    ) >"$TRACE_DIR/agent-stdout.txt" 2>"$TRACE_DIR/agent-stderr.txt" || AGENT_EXIT=$?
 fi
 echo "[claw] agent exited code=$AGENT_EXIT"
 

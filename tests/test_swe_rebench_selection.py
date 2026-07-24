@@ -148,7 +148,9 @@ def test_entrypoint_uses_runtime_llm_env_and_writes_task_manifest() -> None:
     assert 'AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY="${LLM_API_KEY:-__LLM_KEY__}"' in _ENTRYPOINT_TEMPLATE
     assert 'export OPENCLAW_MODEL_REF="${OPENCLAW_MODEL_REF:-__MODEL_FULL__}"' in _ENTRYPOINT_TEMPLATE
     assert 'task_manifest.json' in _ENTRYPOINT_TEMPLATE
+    assert 'agent-cwd.txt' in _ENTRYPOINT_TEMPLATE
     assert 'agent_prompt.txt' in _ENTRYPOINT_TEMPLATE
+    assert 'agent-stdout.txt' in _ENTRYPOINT_TEMPLATE
     assert 'model.patch' in _ENTRYPOINT_TEMPLATE
     assert 'result_summary.json' in _ENTRYPOINT_TEMPLATE
 

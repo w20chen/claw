@@ -156,7 +156,9 @@ def _task_artifacts(trace_dir: Path | None) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for name in (
         "task_manifest.json",
+        "agent-cwd.txt",
         "agent_prompt.txt",
+        "agent-stdout.txt",
         "agent-stderr.txt",
         "repo_status.txt",
         "model.patch",
