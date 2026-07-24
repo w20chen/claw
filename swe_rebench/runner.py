@@ -83,6 +83,7 @@ class BatchReport:
 def _result_dict(r: ContainerResult) -> dict[str, Any]:
     trace_inspection = [_inspect_trace(tf, r.task_id) for tf in r.trace_files]
     artifacts = _task_artifacts(r.trace_dir)
+    smoke = _smoke_summary(artifacts)
     return {
         "task_id": r.task_id,
         "image": r.image,
@@ -93,6 +94,7 @@ def _result_dict(r: ContainerResult) -> dict[str, Any]:
         "trace_lines": sum(_count_lines(tf) for tf in r.trace_files),
         "trace_inspection": trace_inspection,
         "artifacts": artifacts,
+        "smoke": smoke,
         "duration_seconds": round(r.duration_seconds, 1),
     }
 
@@ -179,8 +181,40 @@ def _task_artifacts(trace_dir: Path | None) -> dict[str, Any]:
                 item["summary"] = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
                 item["warning"] = f"cannot parse result summary: {exc}"
+        if name in {"agent-cwd.txt", "agent-stdout.txt", "agent-stderr.txt", "repo_status.txt"}:
+            item["preview"] = _preview_text(path)
         result[name] = item
     return result
+
+
+def _preview_text(path: Path, max_chars: int = 4000) -> str:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "\n...[truncated]"
+
+
+def _smoke_summary(artifacts: dict[str, Any]) -> dict[str, Any]:
+    result_summary = (
+        artifacts.get("result_summary.json", {})
+        .get("summary", {})
+    )
+    has_patch = bool(result_summary.get("has_patch"))
+    testbed_exists = bool(result_summary.get("testbed_exists"))
+    agent_exit_code = result_summary.get("agent_exit_code")
+    cwd = artifacts.get("agent-cwd.txt", {}).get("preview", "").strip()
+    return {
+        "success": has_patch,
+        "reason": "patch produced" if has_patch else "no patch produced",
+        "agent_exit_code": agent_exit_code,
+        "testbed_exists": testbed_exists,
+        "agent_cwd": cwd,
+        "has_patch": has_patch,
+        "patch_bytes": result_summary.get("patch_bytes", 0),
+    }
 
 
 # ── Lock for thread-safe logging ──────────────────────────────────

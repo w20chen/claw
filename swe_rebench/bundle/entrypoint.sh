@@ -184,7 +184,10 @@ echo "[claw] === Phase 5: collect smoke-test artifacts ==="
 PATCH_BYTES=0
 if [ -d /testbed ]; then
     {
-        echo "=== pwd ==="
+        echo "=== agent cwd ==="
+        cat "$TRACE_DIR/agent-cwd.txt" 2>/dev/null || true
+        echo ""
+        echo "=== collector pwd ==="
         pwd
         echo ""
         echo "=== /testbed git status ==="

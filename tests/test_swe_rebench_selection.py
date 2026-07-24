@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 from swe_rebench.task_source import filter_tasks, parse_instance_ids, tasks_from_records
-from swe_rebench.runner import _inspect_trace, _task_artifacts
+from swe_rebench.runner import _inspect_trace, _smoke_summary, _task_artifacts
 from swe_rebench.prepare import _ENTRYPOINT_TEMPLATE
 
 
@@ -157,6 +157,8 @@ def test_entrypoint_uses_runtime_llm_env_and_writes_task_manifest() -> None:
 
 def test_task_artifacts_summarizes_patch_and_result_summary(tmp_path: Path) -> None:
     (tmp_path / "model.patch").write_text("diff --git a/a b/a\n", encoding="utf-8")
+    (tmp_path / "agent-cwd.txt").write_text("/testbed\n", encoding="utf-8")
+    (tmp_path / "agent-stdout.txt").write_text("done\n", encoding="utf-8")
     (tmp_path / "result_summary.json").write_text(
         json.dumps({"has_patch": True, "patch_bytes": 19}),
         encoding="utf-8",
@@ -165,4 +167,26 @@ def test_task_artifacts_summarizes_patch_and_result_summary(tmp_path: Path) -> N
     artifacts = _task_artifacts(tmp_path)
 
     assert artifacts["model.patch"]["has_diff"] is True
+    assert artifacts["agent-cwd.txt"]["preview"] == "/testbed\n"
+    assert artifacts["agent-stdout.txt"]["preview"] == "done\n"
     assert artifacts["result_summary.json"]["summary"]["has_patch"] is True
+
+
+def test_smoke_summary_reports_no_patch_as_unsuccessful() -> None:
+    summary = _smoke_summary(
+        {
+            "agent-cwd.txt": {"preview": "/testbed\n"},
+            "result_summary.json": {
+                "summary": {
+                    "agent_exit_code": 0,
+                    "testbed_exists": True,
+                    "patch_bytes": 0,
+                    "has_patch": False,
+                }
+            },
+        }
+    )
+
+    assert summary["success"] is False
+    assert summary["reason"] == "no patch produced"
+    assert summary["agent_cwd"] == "/testbed"
