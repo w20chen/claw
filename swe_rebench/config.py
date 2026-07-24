@@ -26,14 +26,17 @@ def _env_subst(value: str) -> str:
 @dataclass
 class LLMConfig:
     api_key: str = ""
+    api_key_file: Path | None = None
     upstream_base_url: str = "https://api.deepseek.com"
     model: str = "deepseek-v4-flash"
     openclaw_model_ref: str = "vllm/deepseek-v4-flash"
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "LLMConfig":
+    def from_dict(cls, d: dict[str, Any], repo_root: Path) -> "LLMConfig":
+        api_key_file = _resolve_api_key_file(d.get("api_key_file"), repo_root)
         return cls(
-            api_key=_env_subst(str(d.get("api_key", ""))),
+            api_key=_resolve_api_key(d, repo_root, api_key_file),
+            api_key_file=api_key_file,
             upstream_base_url=_env_subst(str(d.get("upstream_base_url", "https://api.deepseek.com"))),
             model=str(d.get("model", "deepseek-v4-flash")),
             openclaw_model_ref=str(d.get("openclaw_model_ref", "vllm/deepseek-v4-flash")),
@@ -154,7 +157,7 @@ class RunnerConfig:
             repo_root = path.parent.resolve()
         raw = _load_yaml_safe(path)
         return cls(
-            llm=LLMConfig.from_dict(raw.get("llm", {})),
+            llm=LLMConfig.from_dict(raw.get("llm", {}), repo_root),
             docker=DockerConfig.from_dict(raw.get("docker", {})),
             batch=BatchConfig.from_dict(raw.get("batch", {})),
             output=OutputConfig.from_dict(raw.get("output", {}), repo_root),
@@ -195,3 +198,46 @@ def _load_yaml_safe(path: Path) -> dict[str, Any]:
             v = v.strip().strip('"').strip("'")
             current_section[k] = v
     return result
+
+
+def _resolve_api_key_file(value: Any, repo_root: Path) -> Path | None:
+    raw = os.getenv("LLM_API_KEY_FILE") or str(value or "swe_rebench/llm_api_key.txt")
+    if not raw:
+        return None
+    path = Path(_env_subst(raw)).expanduser()
+    return path if path.is_absolute() else repo_root / path
+
+
+def _resolve_api_key(d: dict[str, Any], repo_root: Path, api_key_file: Path | None) -> str:
+    configured = _env_subst(str(d.get("api_key", ""))).strip()
+    if configured:
+        return configured
+    from_file = _read_api_key_file(api_key_file)
+    if from_file:
+        return from_file
+    return _read_dotenv_api_key(repo_root / ".env")
+
+
+def _read_api_key_file(path: Path | None) -> str:
+    if path is None or not path.exists():
+        return ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        value = line.strip()
+        if value and not value.startswith("#"):
+            return value
+    return ""
+
+
+def _read_dotenv_api_key(path: Path) -> str:
+    if not path.exists():
+        return ""
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        key, sep, value = line.partition("=")
+        if sep == "=" and key.strip() == "LLM_API_KEY":
+            return value.strip().strip('"').strip("'")
+    return ""

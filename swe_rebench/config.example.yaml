@@ -8,7 +8,12 @@
 llm:
   # API key for the upstream LLM provider (required)
   # The sidecar proxies requests and records them, then forwards here.
+  # Resolution order:
+  #   1. api_key / ${LLM_API_KEY}
+  #   2. api_key_file (defaults to ./swe_rebench/llm_api_key.txt)
+  #   3. repo .env line: LLM_API_KEY=...
   api_key: "${LLM_API_KEY}"
+  api_key_file: "./swe_rebench/llm_api_key.txt"
 
   # Upstream base URL.  Default: DeepSeek.
   upstream_base_url: "https://api.deepseek.com"

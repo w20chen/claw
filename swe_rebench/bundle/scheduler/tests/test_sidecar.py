@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from agent_scheduler.api.app import create_app
 from agent_scheduler.api.dependencies import build_state
 from agent_scheduler.config import SchedulerConfig
-from agent_scheduler.llm_proxy import _upstream_url
+from agent_scheduler.llm_proxy import _forward_headers, _upstream_url
 from agent_scheduler.monitoring.tool_runtime import _relative_timeline
 
 
@@ -60,6 +60,25 @@ def test_llm_proxy_upstream_url_preserves_v1_when_base_omits_it() -> None:
         )
         == "https://api.deepseek.com/v1/chat/completions"
     )
+
+
+def test_llm_proxy_does_not_forward_client_authorization_header() -> None:
+    class Request:
+        headers = {
+            "authorization": "Bearer sk-test",
+            "content-type": "application/json",
+        }
+
+    headers = _forward_headers(
+        Request(),
+        SchedulerConfig(llm_proxy_upstream_api_key="real-key"),
+    )
+
+    assert headers["authorization"] == "Bearer real-key"
+    assert headers["content-type"] == "application/json"
+
+    headers_without_upstream_key = _forward_headers(Request(), SchedulerConfig())
+    assert "authorization" not in headers_without_upstream_key
 
 
 def test_decision_and_completion_round_trip(tmp_path: Path) -> None:

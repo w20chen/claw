@@ -3,9 +3,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from swe_rebench.config import RunnerConfig
+from swe_rebench.prepare import _ENTRYPOINT_TEMPLATE, _write_entrypoint
 from swe_rebench.task_source import filter_tasks, parse_instance_ids, tasks_from_records
 from swe_rebench.runner import _inspect_trace, _smoke_summary, _task_artifacts
-from swe_rebench.prepare import _ENTRYPOINT_TEMPLATE
 
 
 def _records() -> list[dict[str, object]]:
@@ -190,3 +191,61 @@ def test_smoke_summary_reports_no_patch_as_unsuccessful() -> None:
     assert summary["success"] is False
     assert summary["reason"] == "no patch produced"
     assert summary["agent_cwd"] == "/testbed"
+
+
+def test_runner_config_reads_api_key_from_default_file(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    key_file = tmp_path / "swe_rebench" / "llm_api_key.txt"
+    key_file.parent.mkdir()
+    key_file.write_text("sk-real-from-file\n", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+llm:
+  api_key: "${LLM_API_KEY}"
+""",
+        encoding="utf-8",
+    )
+
+    config = RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
+
+    assert config.llm.api_key == "sk-real-from-file"
+
+
+def test_runner_config_env_api_key_takes_precedence_over_file(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("LLM_API_KEY", "sk-real-from-env")
+    key_file = tmp_path / "swe_rebench" / "llm_api_key.txt"
+    key_file.parent.mkdir()
+    key_file.write_text("sk-real-from-file\n", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+llm:
+  api_key: "${LLM_API_KEY}"
+""",
+        encoding="utf-8",
+    )
+
+    config = RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
+
+    assert config.llm.api_key == "sk-real-from-env"
+
+
+def test_entrypoint_generation_does_not_embed_api_key(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+llm:
+  api_key: "sk-secret"
+bundle:
+  output_dir: "bundle"
+""",
+        encoding="utf-8",
+    )
+    config = RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
+    bundle_dir = tmp_path / "bundle"
+    bundle_dir.mkdir()
+
+    _write_entrypoint(bundle_dir, config)
+
+    assert "sk-secret" not in (bundle_dir / "entrypoint.sh").read_text(encoding="utf-8")

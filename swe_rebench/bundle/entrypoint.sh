@@ -21,6 +21,21 @@ echo "[claw] === Phase 1: environment setup ==="
 bash "$CLAW_ROOT/setup.sh"
 
 echo "[claw] === Phase 2: start sidecar ==="
+if [ -z "${LLM_API_KEY:-}" ]; then
+    echo "[claw] FATAL: LLM_API_KEY is not set; refusing to run with the local sk-test placeholder"
+    mkdir -p "$TRACE_DIR"
+    cat > "$TRACE_DIR/result_summary.json" <<EOF
+{
+  "task_id": "${TASK_INSTANCE_ID:-}",
+  "agent_exit_code": 2,
+  "testbed_exists": $([ -d /testbed ] && echo true || echo false),
+  "patch_bytes": 0,
+  "has_patch": false,
+  "error": "LLM_API_KEY is not set"
+}
+EOF
+    exit 2
+fi
 export AGENT_SCHEDULER_DB_PATH="/tmp/scheduler.sqlite3"
 export AGENT_SCHEDULER_TRACE_DIR="$TRACE_DIR"
 export AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL="${LLM_UPSTREAM_BASE_URL:-https://api.deepseek.com}"

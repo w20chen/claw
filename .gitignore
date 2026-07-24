@@ -17,5 +17,6 @@ dist/
 build/
 *.egg-info/
 .env
+swe_rebench/llm_api_key.txt
 .DS_Store
 .gateway-run.*.log

@@ -14,6 +14,7 @@ from agent_scheduler.trace import AgentTestBenchTraceWriter
 
 
 HOP_BY_HOP_HEADERS = {
+    "authorization",
     "connection",
     "keep-alive",
     "proxy-authenticate",

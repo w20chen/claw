@@ -8,6 +8,7 @@ hardware-scheduler plugin and sidecar tracing enabled.
 ```bash
 cp swe_rebench/config.example.yaml swe_rebench/config.yaml
 # Edit llm.api_key, or keep api_key: "${LLM_API_KEY}" and export LLM_API_KEY.
+# Alternatively, put the raw key in swe_rebench/llm_api_key.txt (gitignored).
 
 python -m swe_rebench.runner prepare --config swe_rebench/config.yaml
 ```
@@ -17,6 +18,7 @@ Default provider config is DeepSeek:
 ```yaml
 llm:
   api_key: "${LLM_API_KEY}"
+  api_key_file: "./swe_rebench/llm_api_key.txt"
   upstream_base_url: "https://api.deepseek.com"
   model: "deepseek-v4-flash"
   openclaw_model_ref: "vllm/deepseek-v4-flash"
