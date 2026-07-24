@@ -497,6 +497,8 @@ def test_host_sandbox_openclaw_config_uses_only_public_top_level_keys(tmp_path: 
     plugin_cfg = parsed["plugins"]["entries"]["hardware-scheduler"]["config"]
     assert plugin_cfg["logLevel"] == "warn"
     assert parsed["env"]["CLAW_EXEC_WORKDIR"] == "/workspace"
+    assert parsed["env"]["CLAW_SANDBOX_HOST_WORKSPACE"] == str(tmp_path / "workspace")
+    assert parsed["env"]["CLAW_SANDBOX_CONTAINER_WORKSPACE"] == "/workspace"
     assert parsed["env"]["CLAW_ENABLE_CGROUP"] == "1"
 
 
@@ -522,6 +524,8 @@ def test_host_sandbox_openclaw_env_points_workspace_dir_at_task_workspace(tmp_pa
 
     assert env["OPENCLAW_WORKSPACE_DIR"] == str(workspace)
     assert env["CLAW_EXEC_WORKDIR"] == "/workspace"
+    assert env["CLAW_SANDBOX_HOST_WORKSPACE"] == str(workspace)
+    assert env["CLAW_SANDBOX_CONTAINER_WORKSPACE"] == "/workspace"
     assert env["CLAW_ENABLE_CGROUP"] == "1"
 
 
@@ -585,6 +589,8 @@ def test_host_sandbox_agent_forces_sandbox_exec_workdir(monkeypatch, tmp_path: P
     assert isinstance(env, dict)
     assert env["OPENCLAW_WORKSPACE_DIR"] == str(workspace)
     assert env["CLAW_EXEC_WORKDIR"] == "/workspace"
+    assert env["CLAW_SANDBOX_HOST_WORKSPACE"] == str(workspace)
+    assert env["CLAW_SANDBOX_CONTAINER_WORKSPACE"] == "/workspace"
 
 
 def test_host_sandbox_builds_default_sandbox_image_when_missing(monkeypatch, tmp_path: Path) -> None:

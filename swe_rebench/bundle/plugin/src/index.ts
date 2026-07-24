@@ -10,6 +10,7 @@ import {buildTrustedResourceScope, instrumentExecParams} from "./exec-instrument
 import type {InstrumentResult} from "./exec-instrumentation.js";
 import {consoleLogger} from "./logging.js";
 import {jsonSafe, paramFeatures, redact, stableDigest} from "./redaction.js";
+import {normalizeSandboxToolParams} from "./sandbox-paths.js";
 import {
   SpanRegistry,
 } from "./trace/registry.js";
@@ -337,7 +338,15 @@ export default definePluginEntry({
         }
       }
 
-      return instrumentation.params === null ? undefined : {params: instrumentation.params};
+      const sandboxParams = normalizeSandboxToolParams(
+        instrumentation.params
+          ?? cloneToolParams(isRecord(event) ? event.params ?? event.arguments ?? event.input ?? null : null),
+        toolName
+      );
+      if (instrumentation.params !== null) {
+        return {params: sandboxParams.params ?? instrumentation.params};
+      }
+      return sandboxParams.changed && sandboxParams.params !== null ? {params: sandboxParams.params} : undefined;
     } catch (error) {
       logger.warn("hardware scheduler decision failed", classifyError(error));
       if (config.mode === "observe" || config.failOpen) return undefined;
@@ -1005,6 +1014,11 @@ function buildRuntimeResourceScope(toolName: string): ResourceScope | null {
     source: "openclaw-runtime",
     attribution_source: "shared-runtime-process",
   };
+}
+
+function cloneToolParams(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) return null;
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
 }
 
 function readSelfCgroupPath(): string | null {

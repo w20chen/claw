@@ -310,6 +310,8 @@ def _run_openclaw_agent(
             "TASK_INSTANCE_ID": task.instance_id,
             "CLAW_SCHEDULER_ENDPOINT": f"http://host.docker.internal:{sidecar_port}",
             "CLAW_EXEC_WORKDIR": "/workspace",
+            "CLAW_SANDBOX_HOST_WORKSPACE": str(workspace),
+            "CLAW_SANDBOX_CONTAINER_WORKSPACE": "/workspace",
             "CLAW_ENABLE_CGROUP": "1",
             "CLAW_LAUNCH_DEBUG": "1",
         }
@@ -433,6 +435,8 @@ def _openclaw_config(
             "env": {
                 "CLAW_SCHEDULER_ENDPOINT": endpoint_sandbox,
                 "CLAW_EXEC_WORKDIR": "/workspace",
+                "CLAW_SANDBOX_HOST_WORKSPACE": str(workspace),
+                "CLAW_SANDBOX_CONTAINER_WORKSPACE": "/workspace",
                 "CLAW_ENABLE_CGROUP": "1",
                 "CLAW_LAUNCH_DEBUG": "1",
             },
@@ -486,6 +490,8 @@ def _openclaw_env(
             "LLM_API_KEY": config.llm.api_key,
             "CLAW_SCHEDULER_ENDPOINT": f"http://host.docker.internal:{sidecar_port}",
             "CLAW_EXEC_WORKDIR": "/workspace",
+            "CLAW_SANDBOX_HOST_WORKSPACE": str(workspace) if workspace is not None else "",
+            "CLAW_SANDBOX_CONTAINER_WORKSPACE": "/workspace",
             "CLAW_ENABLE_CGROUP": "1",
             "CLAW_LAUNCH_DEBUG": "1",
         }

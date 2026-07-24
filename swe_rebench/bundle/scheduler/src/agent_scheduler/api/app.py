@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 
 from fastapi import Depends, FastAPI, Request
@@ -89,6 +90,21 @@ def create_app(state: AppState | None = None) -> FastAPI:
             return event
         return event.model_copy(update={"resource_scope": scope})
 
+    async def completed_with_execution_scope(
+        event: ToolCompletedEvent,
+        s: AppState,
+    ) -> ToolCompletedEvent:
+        if event.resource_scope is not None or event.execution_id is None:
+            return event
+        deadline = time.monotonic() + 0.75
+        while True:
+            scope = s.executions.scope(event.execution_id)
+            if scope is not None:
+                return event.model_copy(update={"resource_scope": scope})
+            if time.monotonic() >= deadline:
+                return event
+            await asyncio.sleep(0.025)
+
     @app.get("/health/live")
     async def live() -> dict[str, bool]:
         return {"live": True}
@@ -176,6 +192,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
         s: AppState = Depends(get_state),
         _: None = Depends(auth),
     ) -> dict[str, bool]:
+        event = await completed_with_execution_scope(event, s)
         inferred_scope = (
             s.docker_exec_observer.infer_scope(event)
             if s.docker_exec_observer is not None
