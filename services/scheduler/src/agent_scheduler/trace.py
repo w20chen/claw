@@ -126,7 +126,9 @@ class AgentTestBenchTraceWriter:
         mono_end_ns = str(time.monotonic_ns())
         duration_ns = str(int(max(0, event.duration_ms) * 1_000_000))
 
-        status_code = "ok" if event.succeeded else ("error" if event.error_type else "unknown")
+        tool_exit_code = _tool_exit_code(event.raw_result, event.tool_name)
+        status_code = _tool_status_code(event, tool_exit_code)
+        status_message = _tool_status_message(event, tool_exit_code)
 
         # Prefer the completed-event scope (populated by the plugin from the
         # execution registry after the tool finishes) over the before-event
@@ -198,8 +200,8 @@ class AgentTestBenchTraceWriter:
             "wall_time_ns": wall_end_ns,
             "monotonic_time_ns": mono_end_ns,
             "duration_ns": duration_ns,
-            "status": {"code": status_code, "message": event.error_type},
-            "output": {"exit_code": 0 if event.succeeded else None, "result": event.raw_result},
+            "status": {"code": status_code, "message": status_message},
+            "output": {"exit_code": _trace_exit_code(event.tool_name, status_code, tool_exit_code), "result": event.raw_result},
             "execution": {
                 "mode": "launcher" if event.execution_id else "in_process_or_runtime_managed",
                 "execution_id": event.execution_id,
@@ -472,6 +474,82 @@ def _parse_timestamp(value: str) -> float:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
     except ValueError:
         return datetime.now(timezone.utc).timestamp()
+
+
+def _tool_exit_code(raw_result: Any | None, tool_name: str) -> int | None:
+    if tool_name != "exec":
+        return None
+    if isinstance(raw_result, int) and raw_result >= 0:
+        return raw_result
+    if not isinstance(raw_result, dict):
+        return None
+    direct = _first_int(raw_result, ("exit_code", "exitCode"))
+    if direct is not None:
+        return direct
+    details = raw_result.get("details")
+    if isinstance(details, dict):
+        return _first_int(details, ("exit_code", "exitCode"))
+    return None
+
+
+def _tool_status_code(event: ToolCompletedEvent, exit_code: int | None) -> str:
+    details = event.raw_result.get("details") if isinstance(event.raw_result, dict) else None
+    raw_status = details.get("status") if isinstance(details, dict) else None
+    raw_error = _raw_tool_error(event.raw_result)
+    if event.error_type == "timeout":
+        return "timeout"
+    if event.error_type == "cancelled":
+        return "cancelled"
+    if exit_code is not None and exit_code != 0:
+        return "error"
+    if raw_status in {"error", "failed"} or raw_error is not None:
+        return "error"
+    if event.succeeded:
+        return "ok"
+    if event.error_type:
+        return "error"
+    return "unknown"
+
+
+def _tool_status_message(event: ToolCompletedEvent, exit_code: int | None) -> str | None:
+    if event.error_type:
+        return event.error_type
+    raw_error = _raw_tool_error(event.raw_result)
+    if raw_error is not None:
+        return raw_error
+    if exit_code is not None and exit_code != 0:
+        return f"exit_code_{exit_code}"
+    return None
+
+
+def _trace_exit_code(tool_name: str, status_code: str, exit_code: int | None) -> int | None:
+    if exit_code is not None:
+        return exit_code
+    if tool_name == "exec" and status_code == "ok":
+        return 0
+    return None
+
+
+def _raw_tool_error(raw_result: Any | None) -> str | None:
+    if not isinstance(raw_result, dict):
+        return None
+    direct = raw_result.get("error")
+    if isinstance(direct, str) and direct:
+        return direct
+    details = raw_result.get("details")
+    if isinstance(details, dict):
+        detail_error = details.get("error") or details.get("failureKind")
+        if isinstance(detail_error, str) and detail_error:
+            return detail_error
+    return None
+
+
+def _first_int(value: dict[str, Any], keys: tuple[str, ...]) -> int | None:
+    for key in keys:
+        item = value.get(key)
+        if isinstance(item, int) and item >= 0:
+            return item
+    return None
 
 
 def _tool_timestamps(sample: ToolRuntimeSample, duration_ms: int) -> tuple[float, float]:

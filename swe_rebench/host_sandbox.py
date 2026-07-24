@@ -302,6 +302,7 @@ def _run_openclaw_agent(
             "TASK_INSTANCE_ID": task.instance_id,
             "CLAW_SCHEDULER_ENDPOINT": f"http://host.docker.internal:{sidecar_port}",
             "CLAW_ENABLE_CGROUP": "1",
+            "CLAW_LAUNCH_DEBUG": "1",
         }
     )
     prompt_path = trace_dir / "agent_prompt.txt"
@@ -582,7 +583,10 @@ def _looks_like_container_id(value: str) -> bool:
 def _write_task_inputs(trace_dir: Path, task: TaskDef, config: RunnerConfig, workspace: Path) -> None:
     prompt = (
         "You are running a SWE-Rebench task in an OpenClaw Docker sandbox.\n\n"
-        "Goal: solve the task by editing the repository mounted at /workspace.\n\n"
+        "Goal: solve the task by editing the repository in the current workspace.\n\n"
+        "Use relative paths for read, edit, write, and apply_patch. For exec, "
+        "run commands from the default working directory or use relative paths; "
+        "avoid absolute /workspace paths in file-tool calls.\n\n"
         "Workflow:\n"
         "1. Inspect the repository.\n"
         "2. Edit the source files needed for a minimal fix.\n"

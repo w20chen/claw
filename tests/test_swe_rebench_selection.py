@@ -5,7 +5,12 @@ from pathlib import Path
 
 from swe_rebench.config import RunnerConfig
 from swe_rebench.docker import ContainerResult
-from swe_rebench.host_sandbox import _ensure_openclaw_sandbox_image, _openclaw_config, _openclaw_env
+from swe_rebench.host_sandbox import (
+    _ensure_openclaw_sandbox_image,
+    _openclaw_config,
+    _openclaw_env,
+    _write_task_inputs,
+)
 from swe_rebench.task_source import TaskDef
 from swe_rebench.prepare import _ENTRYPOINT_TEMPLATE, _PLUGIN_CONFIG, _write_entrypoint
 from swe_rebench.task_source import filter_tasks, parse_instance_ids, tasks_from_records
@@ -400,6 +405,21 @@ def test_host_sandbox_openclaw_env_points_workspace_dir_at_task_workspace(tmp_pa
     env = _openclaw_env(tmp_path / "home", 8765, config, workspace)
 
     assert env["OPENCLAW_WORKSPACE_DIR"] == str(workspace)
+
+
+def test_host_sandbox_prompt_uses_relative_paths(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("", encoding="utf-8")
+    config = RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
+    task = TaskDef(instance_id="task-1", image="image:latest", problem_statement="fix")
+    trace_dir = tmp_path / "trace"
+    workspace = tmp_path / "workspace"
+
+    _write_task_inputs(trace_dir, task, config, workspace)
+    prompt = (trace_dir / "agent_prompt.txt").read_text(encoding="utf-8")
+
+    assert "Use relative paths" in prompt
+    assert "repository mounted at /workspace" not in prompt
 
 
 def test_host_sandbox_builds_default_sandbox_image_when_missing(monkeypatch, tmp_path: Path) -> None:

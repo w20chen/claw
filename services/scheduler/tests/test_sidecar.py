@@ -456,6 +456,74 @@ def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Pa
     assert model_ends[0]["output"]["content"] == "done"
 
 
+def test_trace_marks_raw_exec_exit_code_failure(tmp_path: Path) -> None:
+    client, trace_dir = _trace_client(tmp_path)
+    request: dict[str, object] = {
+        "schema_version": "scheduler.v1",
+        "event_id": "evt-exec-before",
+        "occurred_at": "2026-07-16T03:23:00Z",
+        "plugin_version": "0.1.0",
+        "run_id": "run-exec-fail",
+        "session_id": "session-exec-fail",
+        "session_key": None,
+        "agent_id": "agent-exec-fail",
+        "tool_call_id": "call-exec-fail",
+        "tool_name": "exec",
+        "tool_kind": "shell",
+        "tool_input_kind": "json",
+        "operation_hint": None,
+        "derived_paths": [],
+        "params_digest": "sha256:" + "a" * 64,
+        "param_features": {
+            "serialized_size_bytes": 10,
+            "string_length": 5,
+            "list_item_count": 0,
+            "path_count": 0,
+            "has_command_like_field": True,
+        },
+        "raw_params": {"command": "ls"},
+        "raw_event": None,
+        "resource_scope": None,
+    }
+    decision = client.post("/v1/decisions/tool", json=request).json()
+    completion = {
+        "schema_version": "scheduler.v1",
+        "event_id": "evt-exec-after",
+        "occurred_at": "2026-07-16T03:23:01Z",
+        "plugin_version": "0.1.0",
+        "run_id": "run-exec-fail",
+        "session_id": "session-exec-fail",
+        "session_key": None,
+        "agent_id": "agent-exec-fail",
+        "tool_call_id": "call-exec-fail",
+        "decision_id": decision["decision_id"],
+        "lease_id": decision["lease_id"],
+        "execution_id": "call-exec-fail",
+        "tool_name": "exec",
+        "duration_ms": 100,
+        "succeeded": True,
+        "error_type": None,
+        "error_digest": None,
+        "result_size_bytes": 10,
+        "raw_result": {
+            "details": {
+                "status": "completed",
+                "exitCode": 125,
+                "aggregated": "Command could not be started by the execution environment.",
+            }
+        },
+        "resource_scope": None,
+    }
+
+    assert client.post("/v1/events/tool-completed", json=completion).json() == {"stored": True}
+
+    records = _read_trace_records(trace_dir)
+    tool_end = next(r for r in records if r.get("record_type") == "span_end" and r.get("kind") == "tool")
+    assert tool_end["status"]["code"] == "error"
+    assert tool_end["status"]["message"] == "exit_code_125"
+    assert tool_end["output"]["exit_code"] == 125
+
+
 def test_trace_marks_shared_runtime_process_scope(tmp_path: Path) -> None:
     client, trace_dir = _trace_client(tmp_path)
     request: dict[str, object] = {

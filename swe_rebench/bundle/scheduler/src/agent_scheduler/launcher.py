@@ -30,8 +30,10 @@ def main() -> None:
     if args.command_name == "run":
         try:
             raise SystemExit(run_execution(args.endpoint, args.execution_id, args.token))
-        except Exception:
+        except Exception as exc:
             print("Command could not be started by the execution environment.", file=sys.stderr)
+            if _env_enabled("CLAW_LAUNCH_DEBUG"):
+                print(f"claw-launch debug: {type(exc).__name__}: {exc}", file=sys.stderr)
             raise SystemExit(125) from None
     raise SystemExit(2)
 
