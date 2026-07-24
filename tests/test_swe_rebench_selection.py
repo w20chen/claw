@@ -144,6 +144,31 @@ def test_inspect_trace_flags_missing_task_id_and_tool_spans(tmp_path: Path) -> N
     assert "trace has no tool span/action" in report["warnings"]
 
 
+def test_inspect_trace_detects_tool_kind_span(tmp_path: Path) -> None:
+    trace_path = tmp_path / "trace.jsonl"
+    trace_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"record_type": "trace_metadata", "trace_format_version": 6}),
+                json.dumps(
+                    {
+                        "record_type": "span_start",
+                        "kind": "tool",
+                        "name": "exec",
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = _inspect_trace(trace_path, "")
+
+    assert report["has_tool_span"] is True
+    assert "trace has no tool span/action" not in report["warnings"]
+
+
 def test_entrypoint_uses_runtime_llm_env_and_writes_task_manifest() -> None:
     assert 'AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL="${LLM_UPSTREAM_BASE_URL:-__UPSTREAM__}"' in _ENTRYPOINT_TEMPLATE
     assert 'AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY="${LLM_API_KEY:-__LLM_KEY__}"' in _ENTRYPOINT_TEMPLATE

@@ -139,7 +139,7 @@ def _inspect_trace(path: Path, task_id: str) -> dict[str, Any]:
         record_types[record_type] = record_types.get(record_type, 0) + 1
         span_name = str(record.get("name") or "")
         kind = str(record.get("kind") or "")
-        if "tool" in span_name or record.get("action_type") == "tool_exec":
+        if kind == "tool" or "tool" in span_name or record.get("action_type") == "tool_exec":
             report["has_tool_span"] = True
         if kind == "llm" or "model" in span_name or record.get("action_type") == "llm_call":
             report["has_llm_span"] = True
