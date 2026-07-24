@@ -175,6 +175,81 @@ def test_inspect_trace_detects_tool_kind_span(tmp_path: Path) -> None:
     assert "trace has no tool span/action" not in report["warnings"]
 
 
+def test_inspect_trace_warns_when_launcher_spans_are_unattributed(tmp_path: Path) -> None:
+    trace_path = tmp_path / "trace.jsonl"
+    trace_path.write_text(
+        json.dumps({"record_type": "trace_metadata", "trace_format_version": 6})
+        + "\n"
+        + json.dumps(
+            {
+                "record_type": "span_end",
+                "kind": "tool",
+                "name": "exec",
+                "execution": {"mode": "launcher"},
+                "resources": {"attribution_status": "unattributed"},
+                "status": {"code": "ok"},
+                "output": {"exit_code": None},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = _inspect_trace(trace_path, "")
+
+    assert report["launcher_tool_span_ends"] == 1
+    assert report["unattributed_launcher_tool_span_ends"] == 1
+    assert "launcher tool spans have no resource attribution" in report["warnings"]
+
+
+def test_inspect_trace_warns_when_ok_status_has_failed_exit_code(tmp_path: Path) -> None:
+    trace_path = tmp_path / "trace.jsonl"
+    trace_path.write_text(
+        json.dumps({"record_type": "trace_metadata", "trace_format_version": 6})
+        + "\n"
+        + json.dumps(
+            {
+                "record_type": "span_end",
+                "kind": "tool",
+                "name": "exec",
+                "status": {"code": "ok"},
+                "output": {"result": {"details": {"exitCode": 1}}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = _inspect_trace(trace_path, "")
+
+    assert report["failed_tool_span_ends"] == 1
+    assert "tool span status disagrees with non-zero exit code" in report["warnings"]
+
+
+def test_inspect_trace_does_not_treat_result_code_as_exit_code(tmp_path: Path) -> None:
+    trace_path = tmp_path / "trace.jsonl"
+    trace_path.write_text(
+        json.dumps({"record_type": "trace_metadata", "trace_format_version": 6})
+        + "\n"
+        + json.dumps(
+            {
+                "record_type": "span_end",
+                "kind": "tool",
+                "name": "web_fetch",
+                "status": {"code": "ok"},
+                "output": {"result": {"code": 404, "body": "not found"}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = _inspect_trace(trace_path, "")
+
+    assert report["failed_tool_span_ends"] == 0
+    assert "tool span status disagrees with non-zero exit code" not in report["warnings"]
+
+
 def test_entrypoint_uses_runtime_llm_env_and_writes_task_manifest() -> None:
     assert 'AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL="${LLM_UPSTREAM_BASE_URL:-__UPSTREAM__}"' in _ENTRYPOINT_TEMPLATE
     assert 'AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY="${LLM_API_KEY:-__LLM_KEY__}"' in _ENTRYPOINT_TEMPLATE
@@ -192,10 +267,13 @@ def test_swe_rebench_plugin_config_uses_managed_wrapper_cgroup() -> None:
     assert _PLUGIN_CONFIG["launcherPath"] == "/opt/claw/bin/claw-launch"
     assert _PLUGIN_CONFIG["enableCgroup"] is True
     assert _PLUGIN_CONFIG["securityBoundaryAccepted"] is True
+    assert _PLUGIN_CONFIG["recordRawTrace"] is False
+    assert _PLUGIN_CONFIG["trace"]["include_raw_events"] is False
 
 
 def test_entrypoint_installs_stable_launcher_path() -> None:
     assert "cat > /opt/claw/bin/claw-launch" in _ENTRYPOINT_TEMPLATE
+    assert 'export PYTHONPATH="/claw/scheduler/src${PYTHONPATH:+:$PYTHONPATH}"' in _ENTRYPOINT_TEMPLATE
     assert "python3 -m agent_scheduler.launcher" in _ENTRYPOINT_TEMPLATE
 
 

@@ -45,6 +45,18 @@ def _trace_proxy_client(tmp_path: Path) -> tuple[TestClient, Path]:
     return TestClient(create_app(state)), trace_dir
 
 
+def _trace_proxy_client_with_debug(tmp_path: Path) -> tuple[TestClient, Path]:
+    trace_dir = tmp_path / "traces"
+    state = build_state(
+        SchedulerConfig(
+            trace_dir=trace_dir,
+            llm_proxy_upstream_base_url="https://upstream.example/v1",
+            llm_proxy_debug_dump=True,
+        )
+    )
+    return TestClient(create_app(state)), trace_dir
+
+
 def test_llm_proxy_upstream_url_preserves_v1_when_base_omits_it() -> None:
     assert (
         _upstream_url(
@@ -684,6 +696,7 @@ def test_llm_proxy_reconstructs_streaming_tool_calls(tmp_path: Path, monkeypatch
     assert response.status_code == 200
     # Proxy-only streaming should not write trace without model hook
     assert _read_trace_records(trace_dir) == []
+    assert list(trace_dir.glob("llm_proxy_debug_*.json")) == []
 
 
 def test_llm_proxy_buffers_fragmented_sse_events(tmp_path: Path, monkeypatch) -> None:
@@ -741,6 +754,60 @@ def test_llm_proxy_buffers_fragmented_sse_events(tmp_path: Path, monkeypatch) ->
     assert response.text.count("data: ") == 2
     assert '"content": "hello"' in response.text
     assert "[DONE]" in response.text
+
+
+def test_llm_proxy_writes_debug_dump_only_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    client, trace_dir = _trace_proxy_client_with_debug(tmp_path)
+    event = {
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"content": "hello"},
+                "finish_reason": "stop",
+            }
+        ]
+    }
+
+    class FakeStream:
+        status_code = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def aiter_bytes(self):
+            yield f"data: {json.dumps(event)}\n\n".encode("utf-8")
+            yield b"data: [DONE]\n\n"
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def stream(self, method, url, headers=None, content=None):
+            return FakeStream()
+
+    monkeypatch.setattr("agent_scheduler.llm_proxy.httpx.AsyncClient", FakeAsyncClient)
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "test-model",
+            "stream": True,
+            "messages": [{"role": "user", "content": "hello"}],
+        },
+    )
+
+    assert response.status_code == 200
+    debug_files = list(trace_dir.glob("llm_proxy_debug_*.json"))
+    assert len(debug_files) == 1
 
 
 def test_execution_registration_round_trip(tmp_path: Path) -> None:

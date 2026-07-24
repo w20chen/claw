@@ -115,6 +115,10 @@ def _inspect_trace(path: Path, task_id: str) -> dict[str, Any]:
         "has_task_id": False,
         "has_tool_span": False,
         "has_llm_span": False,
+        "tool_span_ends": 0,
+        "launcher_tool_span_ends": 0,
+        "unattributed_launcher_tool_span_ends": 0,
+        "failed_tool_span_ends": 0,
         "warnings": [],
     }
     try:
@@ -141,6 +145,16 @@ def _inspect_trace(path: Path, task_id: str) -> dict[str, Any]:
         kind = str(record.get("kind") or "")
         if kind == "tool" or "tool" in span_name or record.get("action_type") == "tool_exec":
             report["has_tool_span"] = True
+            if record_type == "span_end":
+                report["tool_span_ends"] += 1
+                status_code = _nested_get(record, ("status", "code"))
+                output_exit_code = _extract_trace_exit_code(record.get("output"))
+                if status_code == "ok" and output_exit_code not in (None, 0):
+                    report["failed_tool_span_ends"] += 1
+                if _nested_get(record, ("execution", "mode")) == "launcher":
+                    report["launcher_tool_span_ends"] += 1
+                    if _nested_get(record, ("resources", "attribution_status")) == "unattributed":
+                        report["unattributed_launcher_tool_span_ends"] += 1
         if kind == "llm" or "model" in span_name or record.get("action_type") == "llm_call":
             report["has_llm_span"] = True
 
@@ -148,7 +162,44 @@ def _inspect_trace(path: Path, task_id: str) -> dict[str, Any]:
         report["warnings"].append("trace does not contain TASK_INSTANCE_ID")
     if not report["has_tool_span"]:
         report["warnings"].append("trace has no tool span/action")
+    if report["launcher_tool_span_ends"] and (
+        report["launcher_tool_span_ends"] == report["unattributed_launcher_tool_span_ends"]
+    ):
+        report["warnings"].append("launcher tool spans have no resource attribution")
+    if report["failed_tool_span_ends"]:
+        report["warnings"].append("tool span status disagrees with non-zero exit code")
     return report
+
+
+def _nested_get(value: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    current: Any = value
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _extract_trace_exit_code(value: Any) -> int | None:
+    if not isinstance(value, dict):
+        return None
+    direct = value.get("exit_code")
+    if isinstance(direct, int):
+        return direct
+    result = value.get("result")
+    if not isinstance(result, dict):
+        return None
+    for key in ("exit_code", "exitCode"):
+        item = result.get(key)
+        if isinstance(item, int):
+            return item
+    details = result.get("details")
+    if isinstance(details, dict):
+        for key in ("exit_code", "exitCode"):
+            item = details.get(key)
+            if isinstance(item, int):
+                return item
+    return None
 
 
 def _task_artifacts(trace_dir: Path | None) -> dict[str, Any]:

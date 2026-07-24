@@ -30,7 +30,7 @@ _PLUGIN_CONFIG: dict[str, Any] = {
     "reportTimeoutMs": 800,
     "failOpen": True,
     "sendRawParams": False,
-    "recordRawTrace": True,
+    "recordRawTrace": False,
     "authTokenEnv": "OPENCLAW_SCHEDULER_TOKEN",
     "logLevel": "info",
     "executionBackend": "managed-wrapper",
@@ -44,7 +44,7 @@ _PLUGIN_CONFIG: dict[str, Any] = {
     "securityBoundaryAccepted": True,
     "trace": {
         "schema_version": 6,
-        "include_raw_events": True,
+        "include_raw_events": False,
         "include_llm_messages": True,
         "include_tool_outputs": True,
         "redact_sensitive_data": True,
@@ -182,6 +182,7 @@ echo "[claw] sidecar PID=$SIDECAR_PID"
 mkdir -p /opt/claw/bin
 cat > /opt/claw/bin/claw-launch <<'EOF_LAUNCHER'
 #!/bin/sh
+export PYTHONPATH="/claw/scheduler/src${PYTHONPATH:+:$PYTHONPATH}"
 if [ -x /opt/conda/bin/python3 ]; then
     exec /opt/conda/bin/python3 -m agent_scheduler.launcher "$@"
 fi
@@ -270,7 +271,6 @@ echo "=== Phase 3 done ==="
 
 echo "[claw] === Phase 4: run agent ==="
 AGENT_EXIT=0
-openclaw agent --help 2>&1 > "$TRACE_DIR/agent-help.txt" || true
 AGENT_CWD="$CLAW_ROOT/scheduler"
 if [ -d /testbed ]; then
     AGENT_CWD="/testbed"

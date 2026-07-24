@@ -25,6 +25,7 @@ import {
 import {
   sanitizeTraceData,
 } from "./trace/sanitizer.js";
+import {extractToolExitCode, traceExitCodeForTool} from "./tool-result.js";
 import type {
   SpanStartRecord,
   SpanEndRecord,
@@ -200,6 +201,7 @@ export default definePluginEntry({
   // ── Debug: dump OpenClaw hook payload keys (once per hook type) ──
   const debugDumped = new Set<string>();
   function dumpHookShape(event: unknown, context: unknown, hookName: string): void {
+    if (config.logLevel !== "debug") return;
     if (debugDumped.has(hookName)) return;
     debugDumped.add(hookName);
     const evtKeys = isRecord(event) ? Object.keys(event as Record<string, unknown>) : [];
@@ -394,14 +396,16 @@ export default definePluginEntry({
     }
 
     // Determine status code
+    const toolExitCode = extractToolExitCode(completion.raw_result, completion.tool_name);
+    const toolSucceeded = completion.succeeded && (toolExitCode === null || toolExitCode === 0);
     let statusCode: StatusCode = "unknown";
-    if (completion.succeeded) {
+    if (toolSucceeded) {
       statusCode = "ok";
     } else if (completion.error_type === "timeout") {
       statusCode = "timeout";
     } else if (completion.error_type === "cancelled") {
       statusCode = "cancelled";
-    } else if (completion.error_type) {
+    } else if (completion.error_type || toolExitCode !== null || completion.succeeded === false) {
       statusCode = "error";
     }
 
@@ -485,6 +489,7 @@ export default definePluginEntry({
     // Write span_end
     if (traceCfg.trace_dir) {
       const seqNo = activeSpan?.sequenceNo ?? 0;
+      const traceExitCode = traceExitCodeForTool(toolName, statusCode, toolExitCode);
       // Prefer span values; fall back to event/context for session_id, agent_id
       const finalSessionId = activeSpan?.sessionId ?? extractString(event, ["session_id", "sessionId"]) ?? extractString(context, ["sessionId", "session_id"]);
       const finalAgentId = activeSpan?.agentId ?? extractString(event, ["agent_id", "agentId"]) ?? extractString(context, ["agentId", "agent_id"]);
@@ -506,10 +511,10 @@ export default definePluginEntry({
         observed_duration_ms: completion.duration_ms ?? null,
         status: {
           code: statusCode,
-          message: completion.error_type ?? null,
+          message: completion.error_type ?? (toolExitCode !== null && toolExitCode !== 0 ? `exit_code_${toolExitCode}` : null),
         },
         output: {
-          exit_code: completion.succeeded ? 0 : null,
+          exit_code: traceExitCode,
           result: traceCfg.include_tool_outputs
             ? (traceCfg.redact_sensitive_data
                 ? sanitizeTraceData(completion.raw_result)
@@ -957,6 +962,8 @@ function buildCompletion(
   const rawResult = includeOutput && isRecord(event)
     ? (event as Record<string, unknown>).result ?? (event as Record<string, unknown>).output ?? (event as Record<string, unknown>).response ?? null
     : null;
+  const toolName = extractString(event, ["tool_name", "toolName", "name"]) ?? "unknown";
+  const exitCode = extractToolExitCode(rawResult, toolName);
   const rawEvent = includeRaw && isRecord(event)
     ? (config.trace.redact_sensitive_data ? redact(event) : jsonSafe(event))
     : null;
@@ -966,9 +973,9 @@ function buildCompletion(
     decision_id: prior?.decisionId ?? null,
     lease_id: prior?.leaseId ?? null,
     execution_id: prior?.executionId ?? null,
-    tool_name: extractString(event, ["tool_name", "toolName", "name"]) ?? "unknown",
+    tool_name: toolName,
     duration_ms: extractNumber(event, ["duration_ms", "durationMs"]) ?? 0,
-    succeeded: extractBoolean(event, ["succeeded", "success"]) ?? errorType === null,
+    succeeded: extractBoolean(event, ["succeeded", "success"]) ?? (errorType === null && (exitCode === null || exitCode === 0)),
     error_type: errorType,
     error_digest: null,
     result_size_bytes: extractNumber(event, ["result_size_bytes", "resultSizeBytes"]),

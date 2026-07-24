@@ -49,6 +49,7 @@ const SENSITIVE_ENV_VAR_PATTERNS = [
 
 const BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9+/=._-]{8,}\b/gi;
 const TOKEN_FLAG_PATTERN = /(--token[= ])\S+/gi;
+const HIGH_PRIVILEGE_MESSAGE_ROLES = new Set(["system", "developer"]);
 
 function isSensitiveKey(key: string): boolean {
   return SENSITIVE_KEY_PATTERNS.some((p) => p.test(key));
@@ -71,6 +72,9 @@ export function sanitizeTraceData(value: unknown): unknown {
     return value;
   }
   if (Array.isArray(value)) {
+    if (looksLikeMessageArray(value)) {
+      return sanitizeMessageArray(value);
+    }
     return value.map((item) => sanitizeTraceData(item));
   }
   if (typeof value === "object") {
@@ -80,6 +84,8 @@ export function sanitizeTraceData(value: unknown): unknown {
         output[key] = REDACTED;
       } else if (key === "env" && typeof child === "object" && child !== null) {
         output[key] = sanitizeEnvObject(child as Record<string, unknown>);
+      } else if (key === "messages" && Array.isArray(child)) {
+        output[key] = sanitizeMessageArray(child);
       } else {
         output[key] = sanitizeTraceData(child);
       }
@@ -117,6 +123,38 @@ function sanitizeEnvObject(env: Record<string, unknown>): Record<string, unknown
     }
   }
   return output;
+}
+
+function looksLikeMessageArray(value: unknown[]): boolean {
+  return value.length > 0 && value.every((item) => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) return false;
+    const role = (item as Record<string, unknown>).role;
+    return typeof role === "string";
+  });
+}
+
+function sanitizeMessageArray(messages: unknown[]): unknown[] {
+  return messages.map((message) => {
+    if (typeof message !== "object" || message === null || Array.isArray(message)) {
+      return sanitizeTraceData(message);
+    }
+
+    const record = message as Record<string, unknown>;
+    const role = typeof record.role === "string" ? record.role.toLowerCase() : "";
+    const output: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(record)) {
+      if (key === "content" && shouldRedactMessageContent(role)) {
+        output[key] = REDACTED;
+      } else {
+        output[key] = sanitizeTraceData(child);
+      }
+    }
+    return output;
+  });
+}
+
+function shouldRedactMessageContent(role: string): boolean {
+  return role.length === 0 || HIGH_PRIVILEGE_MESSAGE_ROLES.has(role);
 }
 
 /**

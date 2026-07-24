@@ -275,6 +275,8 @@ def _write_proxy_debug(
     raw_preview: bytes,
     error: str | None,
 ) -> None:
+    if not config.llm_proxy_debug_dump:
+        return
     try:
         config.trace_dir.mkdir(parents=True, exist_ok=True)
         path = config.trace_dir / f"llm_proxy_debug_{action_id}.json"

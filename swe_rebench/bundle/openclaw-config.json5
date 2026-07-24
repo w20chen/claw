@@ -10,7 +10,7 @@
           "reportTimeoutMs": 800,
           "failOpen": true,
           "sendRawParams": false,
-          "recordRawTrace": true,
+          "recordRawTrace": false,
           "authTokenEnv": "OPENCLAW_SCHEDULER_TOKEN",
           "logLevel": "info",
           "executionBackend": "managed-wrapper",
@@ -28,7 +28,7 @@
           "securityBoundaryAccepted": true,
           "trace": {
             "schema_version": 6,
-            "include_raw_events": true,
+            "include_raw_events": false,
             "include_llm_messages": true,
             "include_tool_outputs": true,
             "redact_sensitive_data": true,

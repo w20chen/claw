@@ -20,6 +20,7 @@ const traceRegistry = await import("../dist/trace/registry.js");
 const traceSanitizer = await import("../dist/trace/sanitizer.js");
 const traceValidator = await import("../dist/trace/validator.js");
 const traceCoverage = await import("../dist/trace/resource-coverage.js");
+const toolResult = await import("../dist/tool-result.js");
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -351,6 +352,38 @@ test("sanitizer redacts CLAW_* env vars", () => {
   assert.equal(result.env.KEEP, "val");
 });
 
+test("sanitizer redacts high-privilege LLM message content", () => {
+  const input = [
+    { role: "system", content: "Available tools: openclaw plugins install" },
+    { role: "developer", content: "BOOTSTRAP.md and plugin-skills details" },
+    { role: "user", content: "Please solve task 12rambau__sepal_ui-411" },
+    { role: "assistant", content: "I will inspect the repository." },
+  ];
+
+  const result = traceSanitizer.sanitizeTraceData(input);
+
+  assert.equal(result[0].content, "<redacted>");
+  assert.equal(result[1].content, "<redacted>");
+  assert.equal(result[2].content, "Please solve task 12rambau__sepal_ui-411");
+  assert.equal(result[3].content, "I will inspect the repository.");
+});
+
+test("sanitizer redacts nested LLM messages fields", () => {
+  const input = {
+    request: {
+      messages: [
+        { role: "system", content: "SOUL.md USER.md TOOLS.md" },
+        { role: "user", content: "Problem statement" },
+      ],
+    },
+  };
+
+  const result = traceSanitizer.sanitizeTraceData(input);
+
+  assert.equal(result.request.messages[0].content, "<redacted>");
+  assert.equal(result.request.messages[1].content, "Problem statement");
+});
+
 test("sanitizer does not mutate input", () => {
   const input = { token: "abc" };
   const copy = JSON.parse(JSON.stringify(input));
@@ -362,6 +395,20 @@ test("sanitizer detects possible secrets", () => {
   assert.equal(traceSanitizer.containsPossibleSecret("Bearer sk-abc123def456"), true);
   assert.equal(traceSanitizer.containsPossibleSecret("Bearer <redacted>"), false);
   assert.equal(traceSanitizer.containsPossibleSecret("hello world"), false);
+});
+
+test("tool result exit code parsing is scoped to exec results", () => {
+  assert.equal(toolResult.extractToolExitCode({ code: 404 }, "web_fetch"), null);
+  assert.equal(toolResult.extractToolExitCode({ details: { code: 1 } }, "exec"), null);
+  assert.equal(toolResult.extractToolExitCode({ details: { exitCode: 1 } }, "exec"), 1);
+  assert.equal(toolResult.extractToolExitCode({ exit_code: 2 }, "exec"), 2);
+});
+
+test("trace exit code falls back to zero only for successful exec spans", () => {
+  assert.equal(toolResult.traceExitCodeForTool("exec", "ok", null), 0);
+  assert.equal(toolResult.traceExitCodeForTool("write", "ok", null), null);
+  assert.equal(toolResult.traceExitCodeForTool("exec", "error", null), null);
+  assert.equal(toolResult.traceExitCodeForTool("exec", "error", 3), 3);
 });
 
 // ── Validator Tests ───────────────────────────────────────────────────

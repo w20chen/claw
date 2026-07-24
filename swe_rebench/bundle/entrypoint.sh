@@ -67,6 +67,7 @@ echo "[claw] sidecar PID=$SIDECAR_PID"
 mkdir -p /opt/claw/bin
 cat > /opt/claw/bin/claw-launch <<'EOF_LAUNCHER'
 #!/bin/sh
+export PYTHONPATH="/claw/scheduler/src${PYTHONPATH:+:$PYTHONPATH}"
 if [ -x /opt/conda/bin/python3 ]; then
     exec /opt/conda/bin/python3 -m agent_scheduler.launcher "$@"
 fi
@@ -155,7 +156,6 @@ echo "=== Phase 3 done ==="
 
 echo "[claw] === Phase 4: run agent ==="
 AGENT_EXIT=0
-openclaw agent --help 2>&1 > "$TRACE_DIR/agent-help.txt" || true
 AGENT_CWD="$CLAW_ROOT/scheduler"
 if [ -d /testbed ]; then
     AGENT_CWD="/testbed"
