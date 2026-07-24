@@ -81,6 +81,8 @@ class BatchReport:
 
 
 def _result_dict(r: ContainerResult) -> dict[str, Any]:
+    trace_inspection = [_inspect_trace(tf, r.task_id) for tf in r.trace_files]
+    artifacts = _task_artifacts(r.trace_dir)
     return {
         "task_id": r.task_id,
         "image": r.image,
@@ -89,6 +91,8 @@ def _result_dict(r: ContainerResult) -> dict[str, Any]:
         "trace_dir": str(r.trace_dir) if r.trace_dir else None,
         "trace_files": [str(tf) for tf in r.trace_files],
         "trace_lines": sum(_count_lines(tf) for tf in r.trace_files),
+        "trace_inspection": trace_inspection,
+        "artifacts": artifacts,
         "duration_seconds": round(r.duration_seconds, 1),
     }
 
@@ -98,6 +102,83 @@ def _count_lines(path: Path) -> int:
         return sum(1 for _ in open(path, encoding="utf-8"))
     except Exception:
         return 0
+
+
+def _inspect_trace(path: Path, task_id: str) -> dict[str, Any]:
+    """Return lightweight sanity checks for an OpenClaw trace export."""
+    report: dict[str, Any] = {
+        "path": str(path),
+        "line_count": 0,
+        "record_types": {},
+        "has_task_id": False,
+        "has_tool_span": False,
+        "has_llm_span": False,
+        "warnings": [],
+    }
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        report["warnings"].append(f"cannot read trace: {exc}")
+        return report
+
+    report["line_count"] = len(lines)
+    for line in lines:
+        if not line.strip():
+            continue
+        if task_id and task_id in line:
+            report["has_task_id"] = True
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            report["warnings"].append("invalid JSON line")
+            continue
+        record_type = record.get("record_type") or record.get("type") or "unknown"
+        record_types = report["record_types"]
+        record_types[record_type] = record_types.get(record_type, 0) + 1
+        span_name = str(record.get("name") or "")
+        kind = str(record.get("kind") or "")
+        if "tool" in span_name or record.get("action_type") == "tool_exec":
+            report["has_tool_span"] = True
+        if kind == "llm" or "model" in span_name or record.get("action_type") == "llm_call":
+            report["has_llm_span"] = True
+
+    if not report["has_task_id"]:
+        report["warnings"].append("trace does not contain TASK_INSTANCE_ID")
+    if not report["has_tool_span"]:
+        report["warnings"].append("trace has no tool span/action")
+    return report
+
+
+def _task_artifacts(trace_dir: Path | None) -> dict[str, Any]:
+    """Summarize smoke-test artifacts emitted by the task container."""
+    if trace_dir is None:
+        return {}
+    result: dict[str, Any] = {}
+    for name in (
+        "task_manifest.json",
+        "agent_prompt.txt",
+        "agent-stderr.txt",
+        "repo_status.txt",
+        "model.patch",
+        "result_summary.json",
+        "phase3.log",
+    ):
+        path = trace_dir / name
+        if not path.exists():
+            continue
+        item: dict[str, Any] = {
+            "path": str(path),
+            "bytes": path.stat().st_size,
+        }
+        if name == "model.patch":
+            item["has_diff"] = path.stat().st_size > 0
+        if name == "result_summary.json":
+            try:
+                item["summary"] = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                item["warning"] = f"cannot parse result summary: {exc}"
+        result[name] = item
+    return result
 
 
 # ── Lock for thread-safe logging ──────────────────────────────────
@@ -239,8 +320,14 @@ def _run_one(
             config=config.docker,
             llm_api_key=config.llm.api_key,
             llm_upstream_url=config.llm.upstream_base_url,
+            llm_model=config.llm.model,
+            openclaw_model_ref=config.llm.openclaw_model_ref,
             timeout_seconds=config.batch.task_timeout_seconds,
-            env_extra=task.extra_env,
+            env_extra={
+                "TASK_BASE_COMMIT": task.base_commit,
+                "TASK_HINT_TEXT": task.hint_text,
+                **task.extra_env,
+            },
         )
         last_result = result
 
@@ -368,9 +455,24 @@ def _resolve_path(value: str, repo_root: Path) -> Path:
     return repo_root / p
 
 
+def _resolve_config_path(config_arg: str | None, repo_root: Path, default_config: Path) -> Path:
+    if config_arg:
+        candidate = Path(config_arg)
+        if not candidate.is_absolute():
+            candidate = repo_root / candidate
+        if candidate.exists():
+            return candidate
+        example = repo_root / "swe_rebench" / "config.example.yaml"
+        if candidate == example:
+            raise FileNotFoundError(f"Config file not found: {candidate}")
+        _log(f"Warning: config file not found at {candidate}; falling back to example config {example}")
+        return example
+    return default_config
+
+
 def main() -> None:
     repo_root = _detect_repo_root()
-    default_config = str(repo_root / "swe_rebench" / "config.example.yaml")
+    default_config = repo_root / "swe_rebench" / "config.example.yaml"
 
     parser = argparse.ArgumentParser(
         description="SWE-Rebench batch runner with OpenClaw + sidecar trace collection.",
@@ -385,19 +487,20 @@ def main() -> None:
 
     # Share --config across all subcommands so it can be placed before
     # OR after the subcommand (argparse limitation workaround).
-    config_arg = lambda p: p.add_argument(
-        "--config", default=None,
-        help=f"Path to config YAML (default: {default_config})",
-    )
+    def add_config_arg(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--config", default=None,
+            help=f"Path to config YAML (default: {default_config})",
+        )
 
     # ── prepare ──
     prep = sub.add_parser("prepare", help="Build the runtime bundle")
-    config_arg(prep)
+    add_config_arg(prep)
     prep.add_argument("--bundle-dir", default=None, help="Override bundle output directory")
 
     # ── run ──
     run_p = sub.add_parser("run", help="Run swe-rebench tasks")
-    config_arg(run_p)
+    add_config_arg(run_p)
     run_p.add_argument("--prepare", action="store_true", dest="do_prepare",
                        help="Run prepare step before executing tasks")
     run_p.add_argument("--dataset", default=None,
@@ -425,16 +528,16 @@ def main() -> None:
 
     # ── collect ──
     col = sub.add_parser("collect", help="Collect and export traces from previous runs")
-    config_arg(col)
+    add_config_arg(col)
     col.add_argument("--export-dir", default=None, help="Override flat export directory")
 
     # ── cleanup ──
     cln = sub.add_parser("cleanup", help="(No-op: containers are auto-removed)")
-    config_arg(cln)
+    add_config_arg(cln)
 
     args = parser.parse_args()
     # Resolve --config: subcommand-level arg takes precedence over top-level.
-    config_path = args.config or default_config
+    config_path = _resolve_config_path(args.config, repo_root, default_config)
 
     if not args.command:
         parser.print_help()

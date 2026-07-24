@@ -1,0 +1,42 @@
+[
+  {
+    "instance_id": "0b01001001__spectree-64",
+    "image": "swerebench/sweb.eval.x86_64.0b01001001_1776_spectree-64",
+    "docker_image": "swerebench/sweb.eval.x86_64.0b01001001_1776_spectree-64",
+    "problem_statement": "[BUG]description for query paramters can not show in swagger ui\nHi, when I add a description for a schema used in query, it can not show in swagger ui but can show in Redoc\r\n```py\r\n@HELLO.route('/', methods=['GET'])\r\n@api.validate(query=HelloForm)\r\ndef hello():\r\n    \"\"\"\r\n    hello 注释\r\n    :return:\r\n    \"\"\"\r\n   return 'ok'\r\n\r\nclass HelloForm(BaseModel):\r\n    \"\"\"\r\n    hello表单\r\n    \"\"\"\r\n    user: str # 用户名称\r\n    msg: str = Field(description='msg test', example='aa')\r\n    index: int\r\n    data: HelloGetListForm\r\n    list: List[HelloListForm]\r\n```\r\n\r\n![截屏2020-10-12 下午7 54 52](https://user-images.githubusercontent.com/60063723/95743785-de70f480-0cc4-11eb-857b-fffd3d7e9cdd.png)\r\n![截屏2020-10-12 下午7 53 59](https://user-images.githubusercontent.com/60063723/95743805-e5980280-0cc4-11eb-99ae-11e6439bae02.png)\r\n\r\n\r\n",
+    "repo": "0b01001001/spectree",
+    "base_commit": "a091fab020ac26548250c907bae0855273a98778",
+    "hint_text": "",
+    "environment": {}
+  },
+  {
+    "instance_id": "12rambau__sepal_ui-411",
+    "image": "swerebench/sweb.eval.x86_64.12rambau_1776_sepal_ui-411",
+    "docker_image": "swerebench/sweb.eval.x86_64.12rambau_1776_sepal_ui-411",
+    "problem_statement": "add a disabled trait on the datepicker\nI'm currently coding it in a module and the process of disabling a datepicker is uterly boring. I think we could add an extra trait to the layout and pilot the enabling and disabling directly from the built-in widget\r\n\r\n\r\n```python\r\nself.w_start = sw.DatePicker(label=\"start\", v_model=None)\r\n\r\n# disable both the slots (hidden to everyone) and the menu \r\nself.w_start.menu.v_slots[0][\"children\"].disabled = True\r\nself.w_start.menu.disabled = True\r\n```\r\n",
+    "repo": "12rambau/sepal_ui",
+    "base_commit": "179bd8d089275c54e94a7614be7ed03d298ef532",
+    "hint_text": "",
+    "environment": {}
+  },
+  {
+    "instance_id": "12rambau__sepal_ui-501",
+    "image": "swerebench/sweb.eval.x86_64.12rambau_1776_sepal_ui-501",
+    "docker_image": "swerebench/sweb.eval.x86_64.12rambau_1776_sepal_ui-501",
+    "problem_statement": "use box for the translator ? \nI discovered this lib while working on the geemap drop. \r\n\r\nI think it could be super handy for the translator keys and maybe faster. https://github.com/cdgriffith/Box \r\n\r\nside note: we will need it anyway for the geemap drop",
+    "repo": "12rambau/sepal_ui",
+    "base_commit": "7eb3f48735e1cfeac75fecf88dd8194c8daea3d3",
+    "hint_text": "",
+    "environment": {}
+  },
+  {
+    "instance_id": "12rambau__sepal_ui-516",
+    "image": "swerebench/sweb.eval.x86_64.12rambau_1776_sepal_ui-516",
+    "docker_image": "swerebench/sweb.eval.x86_64.12rambau_1776_sepal_ui-516",
+    "problem_statement": "deprecate zip_dir\nhttps://github.com/12rambau/sepal_ui/blob/a9255e7c566aac31ee7f8303e74fb7e8a3d57e5f/sepal_ui/aoi/aoi_model.py#L64\r\n\r\nThis folder is created on AOI call but is not used anymore as we are using the tmp module to create the tmp directory.",
+    "repo": "12rambau/sepal_ui",
+    "base_commit": "9c319b0c21b8b1ba75173f3f85fd184747c398de",
+    "hint_text": "",
+    "environment": {}
+  }
+]

@@ -1,0 +1,87 @@
+# SWE-Rebench Integration Configuration
+# ======================================
+# This file configures the OpenClaw + sidecar trace collection inside
+# swe-rebench Docker containers.  Each task runs in its own container
+# with an isolated trace output.
+
+# ── LLM Provider ──────────────────────────────────────────────────
+llm:
+  # API key for the upstream LLM provider (required)
+  # The sidecar proxies requests and records them, then forwards here.
+  api_key: "${LLM_API_KEY}"
+
+  # Upstream base URL.  Default: DeepSeek.
+  upstream_base_url: "https://api.deepseek.com"
+
+  # Model ID as known to the upstream provider.
+  model: "deepseek-v4-flash"
+
+  # How OpenClaw refers to the model internally (vllm/<model>).
+  openclaw_model_ref: "vllm/deepseek-v4-flash"
+
+# ── Docker ─────────────────────────────────────────────────────────
+docker:
+  # Docker daemon socket or host.
+  host: "unix:///var/run/docker.sock"
+
+  # Per-container resource limits.
+  memory_limit: "8g"
+  cpus: 4
+
+  # Network mode.  "bridge" (default) gives each container its own net ns.
+  # "host" may be needed for some swe-rebench images.
+  network_mode: "bridge"
+
+  # Extra DNS servers (optional).
+  dns_servers: []
+
+  # Pull policy: "always", "missing" (default), "never".
+  pull_policy: "missing"
+
+  # Extra capabilities to grant (e.g. ["SYS_PTRACE"]).
+  cap_add: []
+
+# ── Batch Execution ───────────────────────────────────────────────
+batch:
+  # Maximum concurrent containers.
+  parallelism: 4
+
+  # Per-task timeout in seconds.  0 = no timeout.
+  task_timeout_seconds: 1800
+
+  # Retry failed tasks up to this many times.
+  retry_failed: 0
+
+  # Continue running remaining tasks when one fails.
+  continue_on_error: true
+
+# ── Output ────────────────────────────────────────────────────────
+output:
+  # Root directory for per-task trace output.
+  # Each task creates a subdirectory: <trace_root>/<task_id>/
+  trace_root: "./swe_rebench/traces"
+
+  # Summary report written after the batch completes.
+  report_path: "./swe_rebench/report.json"
+
+  # Also copy the final trace.jsonl to a flat directory keyed by task ID.
+  # Set to empty string to disable.
+  flat_export_dir: "./swe_rebench/export"
+
+# ── Runtime Bundle ────────────────────────────────────────────────
+bundle:
+  # Source directories (relative to repo root).
+  plugin_source: "packages/openclaw-plugin"
+  scheduler_source: "services/scheduler"
+  tool_profiles: "examples/tool-profiles.example.json"
+
+  # Where the bundle is assembled.
+  output_dir: "swe_rebench/bundle"
+
+# ── Agent ─────────────────────────────────────────────────────────
+agent:
+  # Maximum tool-call turns before the agent is stopped.
+  max_turns: 50
+
+  # Extra arguments passed to `openclaw agent`.
+  extra_args: []

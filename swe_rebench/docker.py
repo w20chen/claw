@@ -79,6 +79,8 @@ def run_container(
     config: DockerConfig,
     llm_api_key: str,
     llm_upstream_url: str,
+    llm_model: str = "",
+    openclaw_model_ref: str = "",
     timeout_seconds: int = 1800,
     env_extra: dict[str, str] | None = None,
 ) -> ContainerResult:
@@ -104,6 +106,10 @@ def run_container(
         LLM API key.
     llm_upstream_url:
         LLM upstream base URL.
+    llm_model:
+        Provider model name exposed by the sidecar.
+    openclaw_model_ref:
+        OpenClaw model reference passed to the agent command.
     timeout_seconds:
         Maximum wall-clock time for the container.
     env_extra:
@@ -115,8 +121,13 @@ def run_container(
     environment = {
         "PROBLEM_STATEMENT": problem_statement,
         "TASK_INSTANCE_ID": task_id,
+        "TASK_IMAGE": image,
+        "TASK_BASE_COMMIT": "",
+        "TASK_HINT_TEXT": "",
         "LLM_API_KEY": llm_api_key,
         "LLM_UPSTREAM_BASE_URL": llm_upstream_url,
+        "LLM_MODEL": llm_model,
+        "OPENCLAW_MODEL_REF": openclaw_model_ref,
     }
     if env_extra:
         environment.update(env_extra)

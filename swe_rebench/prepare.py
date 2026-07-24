@@ -137,15 +137,15 @@ bash "$CLAW_ROOT/setup.sh"
 echo "[claw] === Phase 2: start sidecar ==="
 export AGENT_SCHEDULER_DB_PATH="/tmp/scheduler.sqlite3"
 export AGENT_SCHEDULER_TRACE_DIR="$TRACE_DIR"
-export AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL="__UPSTREAM__"
-export AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY="__LLM_KEY__"
+export AGENT_SCHEDULER_LLM_UPSTREAM_BASE_URL="${LLM_UPSTREAM_BASE_URL:-__UPSTREAM__}"
+export AGENT_SCHEDULER_LLM_UPSTREAM_API_KEY="${LLM_API_KEY:-__LLM_KEY__}"
 export AGENT_SCHEDULER_LLM_PROXY_ENABLED="true"
 # Model spoofing: the sidecar auto-normalises upstream /v1/models by default.
 # Setting both vars explicitly provides a synthetic fallback for cases where
 # the upstream /models endpoint is unreachable or returns unparseable data.
 # Set UPSTREAM_MODEL to a different value to translate model names.
-export AGENT_SCHEDULER_LLM_PROXY_EXPOSE_MODEL="__MODEL_SHORT__"
-export AGENT_SCHEDULER_LLM_PROXY_UPSTREAM_MODEL="__MODEL_SHORT__"
+export AGENT_SCHEDULER_LLM_PROXY_EXPOSE_MODEL="${LLM_MODEL:-__MODEL_SHORT__}"
+export AGENT_SCHEDULER_LLM_PROXY_UPSTREAM_MODEL="${LLM_MODEL:-__MODEL_SHORT__}"
 export AGENT_SCHEDULER_POLICY="observe-only"
 export AGENT_SCHEDULER_TOOL_PROFILES="$CLAW_ROOT/tool_profiles.json"
 
@@ -179,6 +179,22 @@ fi
 echo "[claw] === Phase 3: configure OpenClaw ==="
 # vLLM provider requires VLLM_API_KEY (any value works).
 export VLLM_API_KEY="${LLM_API_KEY:-sk-test}"
+export OPENCLAW_MODEL_REF="${OPENCLAW_MODEL_REF:-__MODEL_FULL__}"
+export LLM_MODEL="${LLM_MODEL:-__MODEL_SHORT__}"
+PROBLEM_STATEMENT_SAFE="${PROBLEM_STATEMENT:-}"
+TASK_HINT_TEXT_SAFE="${TASK_HINT_TEXT:-}"
+
+cat > "$TRACE_DIR/task_manifest.json" <<EOF
+{
+  "task_id": "${TASK_INSTANCE_ID:-}",
+  "image": "${TASK_IMAGE:-}",
+  "base_commit": "${TASK_BASE_COMMIT:-}",
+  "model": "$LLM_MODEL",
+  "openclaw_model_ref": "$OPENCLAW_MODEL_REF",
+  "problem_statement_bytes": ${#PROBLEM_STATEMENT_SAFE},
+  "hint_text_bytes": ${#TASK_HINT_TEXT_SAFE}
+}
+EOF
 
 # Save ALL Phase 3 diagnostics to a log file for debugging.
 # Each command handles its own errors so 'set -e' does not abort.
@@ -189,8 +205,8 @@ echo "=== openclaw onboard ==="
 openclaw onboard --non-interactive --accept-risk --skip-health \
     --mode local --auth-choice vllm \
     --custom-base-url "http://127.0.0.1:$SIDECAR_PORT/v1" \
-    --custom-api-key "__LLM_KEY__" \
-    --custom-model-id "__MODEL_SHORT__" || echo "onboard FAILED (exit=$?)"
+    --custom-api-key "${LLM_API_KEY:-}" \
+    --custom-model-id "$LLM_MODEL" || echo "onboard FAILED (exit=$?)"
 echo ""
 
 echo "=== openclaw plugins install ==="
@@ -228,11 +244,35 @@ AGENT_EXIT=0
 openclaw agent --help 2>&1 > "$TRACE_DIR/agent-help.txt" || true
 
 if [ -n "${PROBLEM_STATEMENT:-}" ]; then
-    echo "$PROBLEM_STATEMENT" > /tmp/problem_statement.txt
-    echo "[claw] running: openclaw agent --local --agent main --model __MODEL_FULL__ ..."
+    cat > /tmp/problem_statement.txt <<'EOF_PROMPT'
+You are running inside a SWE-Rebench task container.
+
+Goal: solve the task by editing the repository inside the container.
+
+Important paths:
+- The repository is usually at /testbed. Start there if it exists.
+- Trace and smoke-test artifacts are written under /traces.
+
+Workflow:
+1. Inspect the repository and understand the bug.
+2. Edit the source files needed for a minimal fix.
+3. Run relevant tests or a focused reproduction command.
+4. Leave the repository modified with your solution. Do not only explain the fix.
+5. If you cannot finish, write down exactly what blocked you.
+
+Task instance:
+EOF_PROMPT
+    printf '%s\n\n' "${TASK_INSTANCE_ID:-unknown}" >> /tmp/problem_statement.txt
+    printf '%s\n' "Problem statement:" >> /tmp/problem_statement.txt
+    printf '%s\n\n' "$PROBLEM_STATEMENT" >> /tmp/problem_statement.txt
+    if [ -n "${TASK_HINT_TEXT:-}" ]; then
+        printf '%s\n%s\n\n' "Hint:" "$TASK_HINT_TEXT" >> /tmp/problem_statement.txt
+    fi
+    cp /tmp/problem_statement.txt "$TRACE_DIR/agent_prompt.txt"
+    echo "[claw] running: openclaw agent --local --agent main --model $OPENCLAW_MODEL_REF ..."
     openclaw agent --local \
         --agent main \
-        --model "__MODEL_FULL__" \
+        --model "$OPENCLAW_MODEL_REF" \
         --message-file /tmp/problem_statement.txt \
         2>"$TRACE_DIR/agent-stderr.txt" || AGENT_EXIT=$?
 else
@@ -241,7 +281,44 @@ else
 fi
 echo "[claw] agent exited code=$AGENT_EXIT"
 
-echo "[claw] === Phase 5: stop sidecar ==="
+echo "[claw] === Phase 5: collect smoke-test artifacts ==="
+PATCH_BYTES=0
+if [ -d /testbed ]; then
+    {
+        echo "=== pwd ==="
+        pwd
+        echo ""
+        echo "=== /testbed git status ==="
+        git -C /testbed status --short || true
+        echo ""
+        echo "=== /testbed git diff --stat ==="
+        git -C /testbed diff --stat || true
+    } > "$TRACE_DIR/repo_status.txt" 2>&1 || true
+
+    git -C /testbed config --add safe.directory /testbed >/dev/null 2>&1 || true
+    if [ -n "${TASK_BASE_COMMIT:-}" ]; then
+        git -C /testbed diff "$TASK_BASE_COMMIT" -- . > "$TRACE_DIR/model.patch" 2>/dev/null || true
+    else
+        git -C /testbed diff -- . > "$TRACE_DIR/model.patch" 2>/dev/null || true
+    fi
+    if [ -f "$TRACE_DIR/model.patch" ]; then
+        PATCH_BYTES=$(wc -c < "$TRACE_DIR/model.patch" | tr -d ' ')
+    fi
+else
+    echo "[claw] WARNING: /testbed not found" > "$TRACE_DIR/repo_status.txt"
+fi
+
+cat > "$TRACE_DIR/result_summary.json" <<EOF
+{
+  "task_id": "${TASK_INSTANCE_ID:-}",
+  "agent_exit_code": $AGENT_EXIT,
+  "testbed_exists": $([ -d /testbed ] && echo true || echo false),
+  "patch_bytes": $PATCH_BYTES,
+  "has_patch": $([ "$PATCH_BYTES" -gt 0 ] && echo true || echo false)
+}
+EOF
+
+echo "[claw] === Phase 6: stop sidecar ==="
 kill "$SIDECAR_PID" 2>/dev/null || true
 wait "$SIDECAR_PID" 2>/dev/null || true
 sleep 2
