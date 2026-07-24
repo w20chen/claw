@@ -19,9 +19,10 @@ export function normalizeSandboxToolParams(
     ?? normalizePathEnv(env.execWorkdir)
     ?? "/workspace";
   if (hostWorkspace === null) return {params, changed: false};
+  const targetWorkspace = usesContainerWorkspace(toolName) ? containerWorkspace : null;
 
   let changed = false;
-  const normalized = rewritePathFields(params, hostWorkspace, containerWorkspace, (didChange) => {
+  const normalized = rewritePathFields(params, hostWorkspace, targetWorkspace, (didChange) => {
     changed = changed || didChange;
   });
 
@@ -49,25 +50,25 @@ export function normalizeSandboxToolParams(
 function rewritePathFields(
   value: Record<string, unknown>,
   hostWorkspace: string,
-  containerWorkspace: string,
+  targetWorkspace: string | null,
   markChanged: (changed: boolean) => void
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
     if (typeof item === "string" && isPathLikeKey(key)) {
-      const mapped = mapHostWorkspacePath(item, hostWorkspace, containerWorkspace);
+      const mapped = mapHostWorkspacePath(item, hostWorkspace, targetWorkspace);
       out[key] = mapped;
       markChanged(mapped !== item);
       continue;
     }
     if (isPlainRecord(item)) {
-      out[key] = rewritePathFields(item as Record<string, unknown>, hostWorkspace, containerWorkspace, markChanged);
+      out[key] = rewritePathFields(item as Record<string, unknown>, hostWorkspace, targetWorkspace, markChanged);
       continue;
     }
     if (Array.isArray(item)) {
       out[key] = item.map((entry) => {
         if (isPlainRecord(entry)) {
-          return rewritePathFields(entry as Record<string, unknown>, hostWorkspace, containerWorkspace, markChanged);
+          return rewritePathFields(entry as Record<string, unknown>, hostWorkspace, targetWorkspace, markChanged);
         }
         return entry;
       });
@@ -95,13 +96,18 @@ function isPathLikeKey(key: string): boolean {
   ].includes(normalized);
 }
 
-function mapHostWorkspacePath(value: string, hostWorkspace: string, containerWorkspace: string): string {
+function mapHostWorkspacePath(value: string, hostWorkspace: string, targetWorkspace: string | null): string {
   const normalized = normalizePathString(value);
-  if (normalized === hostWorkspace) return containerWorkspace;
+  if (normalized === hostWorkspace) return targetWorkspace ?? ".";
   if (normalized.startsWith(`${hostWorkspace}/`)) {
-    return `${containerWorkspace}${normalized.slice(hostWorkspace.length)}`;
+    const suffix = normalized.slice(hostWorkspace.length + 1);
+    return targetWorkspace === null ? suffix : `${targetWorkspace}/${suffix}`;
   }
   return value;
+}
+
+function usesContainerWorkspace(toolName: string): boolean {
+  return toolName === "exec" || toolName === "process";
 }
 
 function normalizePathEnv(value: string | undefined): string | null {

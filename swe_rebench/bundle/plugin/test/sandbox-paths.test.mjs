@@ -7,7 +7,7 @@ const env = {
   containerWorkspace: "/workspace",
 };
 
-test("sandbox path normalization maps file tool host paths into container workspace", () => {
+test("sandbox path normalization maps file tool host paths to workspace-relative paths", () => {
   const result = normalizeSandboxToolParams(
     {
       path: "/home/weitian/claw/swe_rebench/workspaces/0b01001001__spectree-64/setup.py",
@@ -18,8 +18,8 @@ test("sandbox path normalization maps file tool host paths into container worksp
   );
 
   assert.equal(result.changed, true);
-  assert.equal(result.params.path, "/workspace/setup.py");
-  assert.equal(result.params.cwd, "/workspace");
+  assert.equal(result.params.path, "setup.py");
+  assert.equal(result.params.cwd, ".");
 });
 
 test("sandbox path normalization leaves relative paths alone", () => {

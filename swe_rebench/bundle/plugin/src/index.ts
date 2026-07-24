@@ -339,8 +339,7 @@ export default definePluginEntry({
       }
 
       const sandboxParams = normalizeSandboxToolParams(
-        instrumentation.params
-          ?? cloneToolParams(isRecord(event) ? event.params ?? event.arguments ?? event.input ?? null : null),
+        instrumentation.params ?? cloneEventParams(event),
         toolName
       );
       if (instrumentation.params !== null) {
@@ -349,6 +348,10 @@ export default definePluginEntry({
       return sandboxParams.changed && sandboxParams.params !== null ? {params: sandboxParams.params} : undefined;
     } catch (error) {
       logger.warn("hardware scheduler decision failed", classifyError(error));
+      const sandboxParams = normalizeSandboxToolParams(cloneEventParams(event), toolName);
+      if ((config.mode === "observe" || config.failOpen) && sandboxParams.changed && sandboxParams.params !== null) {
+        return {params: sandboxParams.params};
+      }
       if (config.mode === "observe" || config.failOpen) return undefined;
       return {
         block: true,
@@ -1014,6 +1017,10 @@ function buildRuntimeResourceScope(toolName: string): ResourceScope | null {
     source: "openclaw-runtime",
     attribution_source: "shared-runtime-process",
   };
+}
+
+function cloneEventParams(event: unknown): Record<string, unknown> | null {
+  return cloneToolParams(isRecord(event) ? event.params ?? event.arguments ?? event.input ?? null : null);
 }
 
 function cloneToolParams(value: unknown): Record<string, unknown> | null {
