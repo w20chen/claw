@@ -12,6 +12,7 @@ from swe_rebench.host_sandbox import (
     _openclaw_env,
     _run_openclaw_agent,
     _reset_directory,
+    _sandbox_container_prefix,
     _write_task_inputs,
 )
 from swe_rebench.task_source import TaskDef
@@ -476,13 +477,30 @@ def test_host_sandbox_openclaw_config_uses_only_public_top_level_keys(tmp_path: 
     parsed = json.loads(raw)
 
     assert set(parsed) == {"agents", "plugins", "env"}
+    assert parsed["agents"]["defaults"]["workspace"] == str(tmp_path / "workspace")
+    assert parsed["agents"]["defaults"]["repoRoot"] == str(tmp_path / "workspace")
     docker_cfg = parsed["agents"]["defaults"]["sandbox"]["docker"]
+    assert docker_cfg["containerPrefix"] == _sandbox_container_prefix(tmp_path / "workspace")
     assert docker_cfg["workdir"] == "/workspace"
     assert docker_cfg["extraHosts"] == ["host.docker.internal:host-gateway"]
     assert "binds" not in docker_cfg
     assert parsed["agents"]["defaults"]["sandbox"]["workspaceAccess"] == "rw"
     plugin_cfg = parsed["plugins"]["entries"]["hardware-scheduler"]["config"]
     assert plugin_cfg["logLevel"] == "warn"
+    assert parsed["env"]["CLAW_EXEC_WORKDIR"] == "/workspace"
+    assert parsed["env"]["CLAW_ENABLE_CGROUP"] == "1"
+
+
+def test_host_sandbox_container_prefix_is_stable_and_workspace_scoped(tmp_path: Path) -> None:
+    first = _sandbox_container_prefix(tmp_path / "workspace-a")
+    second = _sandbox_container_prefix(tmp_path / "workspace-a")
+    other = _sandbox_container_prefix(tmp_path / "workspace-b")
+
+    assert first == second
+    assert first != other
+    assert first.startswith("claw-srb-")
+    assert first.endswith("-")
+    assert len(first) < 32
 
 
 def test_host_sandbox_openclaw_env_points_workspace_dir_at_task_workspace(tmp_path: Path) -> None:
@@ -494,6 +512,8 @@ def test_host_sandbox_openclaw_env_points_workspace_dir_at_task_workspace(tmp_pa
     env = _openclaw_env(tmp_path / "home", 8765, config, workspace)
 
     assert env["OPENCLAW_WORKSPACE_DIR"] == str(workspace)
+    assert env["CLAW_EXEC_WORKDIR"] == "/workspace"
+    assert env["CLAW_ENABLE_CGROUP"] == "1"
 
 
 def test_host_sandbox_prompt_uses_relative_paths(tmp_path: Path) -> None:

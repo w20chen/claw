@@ -65,6 +65,9 @@ export async function instrumentExecParams(
     if (params.host === "gateway") {
       delete params.host;
     }
+    if (params.elevated === true) {
+      delete params.elevated;
+    }
   }
   let token: string | null = null;
 

@@ -8,6 +8,7 @@ workspace.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -368,12 +369,15 @@ def _openclaw_config(
         {
             "agents": {
                 "defaults": {
+                    "workspace": str(workspace),
+                    "repoRoot": str(workspace),
                     "sandbox": {
                         "mode": "all",
                         "backend": "docker",
                         "scope": "session",
                         "workspaceAccess": "rw",
                         "docker": {
+                            "containerPrefix": _sandbox_container_prefix(workspace),
                             "workdir": "/workspace",
                             "network": "bridge",
                             "extraHosts": ["host.docker.internal:host-gateway"],
@@ -423,10 +427,18 @@ def _openclaw_config(
             },
             "env": {
                 "CLAW_SCHEDULER_ENDPOINT": endpoint_sandbox,
+                "CLAW_EXEC_WORKDIR": "/workspace",
+                "CLAW_ENABLE_CGROUP": "1",
+                "CLAW_LAUNCH_DEBUG": "1",
             },
         },
         indent=2,
     )
+
+
+def _sandbox_container_prefix(workspace: Path) -> str:
+    digest = hashlib.sha256(str(workspace).encode("utf-8")).hexdigest()[:12]
+    return f"claw-srb-{digest}-"
 
 
 def _ensure_plugin_built(trace_dir: Path, plugin_dir: Path) -> None:
@@ -468,6 +480,9 @@ def _openclaw_env(
             "VLLM_API_KEY": config.llm.api_key or "sk-test",
             "LLM_API_KEY": config.llm.api_key,
             "CLAW_SCHEDULER_ENDPOINT": f"http://host.docker.internal:{sidecar_port}",
+            "CLAW_EXEC_WORKDIR": "/workspace",
+            "CLAW_ENABLE_CGROUP": "1",
+            "CLAW_LAUNCH_DEBUG": "1",
         }
     )
     (openclaw_home / ".openclaw").mkdir(parents=True, exist_ok=True)
