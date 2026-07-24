@@ -13,6 +13,7 @@ swe-rebench container at ``/claw``.  The bundle includes:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import stat
 import sys
@@ -32,15 +33,15 @@ _PLUGIN_CONFIG: dict[str, Any] = {
     "recordRawTrace": True,
     "authTokenEnv": "OPENCLAW_SCHEDULER_TOKEN",
     "logLevel": "info",
-    "executionBackend": "marker",
+    "executionBackend": "managed-wrapper",
     "launcherPath": "/opt/claw/bin/claw-launch",
     "instrumentHosts": ["gateway"],
     "instrumentTools": ["exec"],
-    "enableCgroup": False,
+    "enableCgroup": True,
     "enableAffinity": False,
     "enableNuma": False,
     "profilingMode": "off",
-    "securityBoundaryAccepted": False,
+    "securityBoundaryAccepted": True,
     "trace": {
         "schema_version": 6,
         "include_raw_events": True,
@@ -77,7 +78,7 @@ def build_bundle(config: RunnerConfig) -> Path:
     repo = config.repo_root
     bundle_dir = repo / config.bundle.output_dir
     if bundle_dir.exists():
-        shutil.rmtree(bundle_dir)
+        _remove_tree(bundle_dir)
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
     _copy_plugin(repo, bundle_dir, config)
@@ -97,7 +98,7 @@ def build_bundle(config: RunnerConfig) -> Path:
 def _copy_plugin(repo: Path, bundle_dir: Path, config: RunnerConfig) -> None:
     src = repo / config.bundle.plugin_source
     dst = bundle_dir / "plugin"
-    _copytree_selective(src, dst, skip={"node_modules", ".git", "__pycache__"})
+    _copytree_selective(src, dst, skip={"node_modules", ".npm-cache", ".git", "__pycache__"})
     _log(f"  Copied plugin source ({_count_files(dst)} files)")
 
 
@@ -174,6 +175,19 @@ PYTHONPATH=src $_CLW_PYTHON -m agent_scheduler.main \
     --host 127.0.0.1 --port "$SIDECAR_PORT" &
 SIDECAR_PID=$!
 echo "[claw] sidecar PID=$SIDECAR_PID"
+
+# Install a stable launcher path for managed-wrapper exec instrumentation.
+# pip may place console scripts under /opt/conda/bin or /usr/local/bin
+# depending on the task image, while the plugin config points here.
+mkdir -p /opt/claw/bin
+cat > /opt/claw/bin/claw-launch <<'EOF_LAUNCHER'
+#!/bin/sh
+if [ -x /opt/conda/bin/python3 ]; then
+    exec /opt/conda/bin/python3 -m agent_scheduler.launcher "$@"
+fi
+exec python3 -m agent_scheduler.launcher "$@"
+EOF_LAUNCHER
+chmod +x /opt/claw/bin/claw-launch
 
 # Wait for ready
 READY=0
@@ -566,6 +580,20 @@ def _copytree_selective(src: Path, dst: Path, skip: set[str]) -> None:
                     break
         return ignored
     shutil.copytree(str(src), str(dst), ignore=_ignore, dirs_exist_ok=True)
+
+
+def _remove_tree(path: Path) -> None:
+    def _make_writable_and_retry(func: object, item: str, _exc_info: object) -> None:
+        try:
+            os.chmod(item, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+        except OSError:
+            pass
+        try:
+            func(item)  # type: ignore[operator]
+        except OSError:
+            raise
+
+    shutil.rmtree(path, onerror=_make_writable_and_retry)
 
 
 def _count_files(directory: Path) -> int:

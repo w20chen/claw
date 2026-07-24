@@ -35,4 +35,13 @@ Useful fields:
 - `resources.attribution_status`: resource attribution status.
 - `resources.cpu_time_s`, `resources.rss_peak_bytes`: sampled resource data.
 
+Coverage reasons distinguish attribution failures from expected shared scopes:
+
+- `not_applicable`: no local payload process applies, e.g. LLM spans.
+- `internal_tool_no_process`: an in-process tool had no PID/cgroup scope.
+- `shared_runtime_process`: an internal tool was sampled through the shared
+  OpenClaw runtime process, not a dedicated tool process.
+- `monitor_window_no_overlap`: a PID/cgroup existed, but the sampler did not
+  capture an overlapping resource window.
+
 The JSON Schema contracts remain the source of truth for protocol details.

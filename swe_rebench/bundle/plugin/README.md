@@ -1,42 +1,40 @@
-# OpenClaw Trace Recorder Plugin
+# OpenClaw Hardware Scheduler Plugin
 
-Build:
+This package is the OpenClaw plugin entrypoint. It reports model/tool hooks to
+the scheduler sidecar and can instrument `exec` calls for stronger resource
+attribution.
+
+For the full user workflow, use
+[../../docs/operator-guide.md](../../docs/operator-guide.md).
+
+## Build
 
 ```bash
 npm install
 npm run build
-npm pack
+npm test
 ```
 
-Key config:
+## Install Into OpenClaw
 
-- `endpoint=http://127.0.0.1:8765`
-- `mode=observe`
-- `recordRawTrace=false`
-- `executionBackend=hook-only`
-
-Set `recordRawTrace=true` to send OpenClaw hook-visible model input/output,
-tool args/results, and raw hook payloads to the sidecar trace writer.
-If OpenClaw does not pass `api.pluginConfig` to this hook-only plugin shape,
-the plugin also accepts these environment overrides:
+From the repository root:
 
 ```bash
-export OPENCLAW_HARDWARE_SCHEDULER_ENDPOINT=http://127.0.0.1:8765
-export OPENCLAW_HARDWARE_SCHEDULER_RECORD_RAW_TRACE=true
-export OPENCLAW_HARDWARE_SCHEDULER_EXECUTION_BACKEND=managed-wrapper
-export OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH="$(command -v claw-launch)"
-test -n "$OPENCLAW_HARDWARE_SCHEDULER_LAUNCHER_PATH"
-export OPENCLAW_HARDWARE_SCHEDULER_SECURITY_BOUNDARY_ACCEPTED=true
+openclaw plugins install --link ./packages/openclaw-plugin
+openclaw plugins enable hardware-scheduler
+openclaw plugins inspect hardware-scheduler --runtime --json
 ```
 
-If `command -v claw-launch` is empty, install the sidecar package first:
+Expected hooks:
 
-```bash
-cd ~/claw
-python3 -m pip install -e 'services/scheduler[dev]'
+```text
+before_tool_call
+after_tool_call
+model_call_started
+model_call_ended
 ```
 
-For stronger `exec` resource attribution, use `managed-wrapper`:
+## Recommended Config
 
 ```json5
 {
@@ -46,6 +44,8 @@ For stronger `exec` resource attribution, use `managed-wrapper`:
         enabled: true,
         config: {
           endpoint: "http://127.0.0.1:8765",
+          mode: "observe",
+          failOpen: true,
           recordRawTrace: true,
           executionBackend: "managed-wrapper",
           launcherPath: "/absolute/path/to/claw-launch",
@@ -57,4 +57,6 @@ For stronger `exec` resource attribution, use `managed-wrapper`:
 }
 ```
 
-The plugin remains a normal OpenClaw plugin. It does not modify OpenClaw core.
+`recordRawTrace` is disabled by package default. Enable it when you want
+hook-visible tool args/results in traces. Use `managed-wrapper` when you want
+the sidecar to correlate `exec` with a trusted PID or cgroup scope.

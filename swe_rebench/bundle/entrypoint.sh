@@ -61,6 +61,19 @@ PYTHONPATH=src $_CLW_PYTHON -m agent_scheduler.main \
 SIDECAR_PID=$!
 echo "[claw] sidecar PID=$SIDECAR_PID"
 
+# Install a stable launcher path for managed-wrapper exec instrumentation.
+# pip may place console scripts under /opt/conda/bin or /usr/local/bin
+# depending on the task image, while the plugin config points here.
+mkdir -p /opt/claw/bin
+cat > /opt/claw/bin/claw-launch <<'EOF_LAUNCHER'
+#!/bin/sh
+if [ -x /opt/conda/bin/python3 ]; then
+    exec /opt/conda/bin/python3 -m agent_scheduler.launcher "$@"
+fi
+exec python3 -m agent_scheduler.launcher "$@"
+EOF_LAUNCHER
+chmod +x /opt/claw/bin/claw-launch
+
 # Wait for ready
 READY=0
 for i in $(seq 1 60); do

@@ -140,7 +140,7 @@ export function computeCoverage(input: CoverageInput): CoverageResult {
     coverageReason = "pid_registered_late"; // conservative default
   } else {
     quality = "unknown";
-    coverageReason = "pid_unavailable";
+    coverageReason = "monitor_window_no_overlap";
   }
 
   // Attribution

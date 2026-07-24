@@ -4,6 +4,7 @@ import {SidecarClient} from "./client.js";
 import {loadConfig, isRecord} from "./config.js";
 import {CorrelationMap} from "./correlation.js";
 import type {CommonEvent, ModelEvent, PluginConfig, ToolBeforeRequest, ToolCompletedEvent} from "./contracts.js";
+import type {ResourceScope} from "./contracts.js";
 import {buildTrustedResourceScope, instrumentExecParams} from "./exec-instrumentation.js";
 import type {InstrumentResult} from "./exec-instrumentation.js";
 import {consoleLogger} from "./logging.js";
@@ -308,7 +309,7 @@ export default definePluginEntry({
     // Original sidecar logic
     const payload = buildToolBefore(event, config);
     mergeContext(payload, context);
-    payload.resource_scope = buildTrustedResourceScope(event, context);
+    payload.resource_scope = buildTrustedResourceScope(event, context) ?? buildRuntimeResourceScope(toolName);
     try {
       const decision = await client.decide(payload);
       if (config.mode === "enforce" && decision.action === "block") {
@@ -378,7 +379,7 @@ export default definePluginEntry({
       config
     );
     mergeContext(completion, context);
-    completion.resource_scope = buildTrustedResourceScope(event, context);
+    completion.resource_scope = buildTrustedResourceScope(event, context) ?? buildRuntimeResourceScope(toolName);
     if (completion.resource_scope === null && completion.execution_id !== null) {
       try {
         completion.resource_scope = await client.getExecutionScope(completion.execution_id);
@@ -433,8 +434,9 @@ export default definePluginEntry({
 
     // Build resource info
     const resourceScope = completion.resource_scope;
-    const hasPid = (resourceScope?.pid ?? resourceScope?.root_pid) !== null;
-    const hasCgroup = resourceScope?.cgroup_path !== null;
+    const hasPid = (resourceScope?.pid ?? resourceScope?.root_pid) != null;
+    const hasCgroup = resourceScope?.cgroup_path != null;
+    const isSharedRuntime = isSharedRuntimeScope(resourceScope);
 
     let attrStatus: AttributionStatus;
     let resQuality: MonitorQuality = "unknown";
@@ -442,11 +444,15 @@ export default definePluginEntry({
 
     if (!hasPid && !hasCgroup) {
       attrStatus = "unattributed";
-      coverageReason = "pid_unavailable";
+      coverageReason = completion.execution_id ? "pid_unavailable" : "internal_tool_no_process";
     } else if (hasCgroup) {
       attrStatus = "attributed";
       coverageReason = "full_window";
       resQuality = "partial"; // We don't know the exact monitor window without launcher data
+    } else if (isSharedRuntime) {
+      attrStatus = "partially_attributed";
+      coverageReason = "shared_runtime_process";
+      resQuality = "partial";
     } else {
       attrStatus = "partially_attributed";
       coverageReason = "pid_registered_late";
@@ -457,7 +463,7 @@ export default definePluginEntry({
     if (!completion.execution_id && !hasPid) {
       attrStatus = "unattributed";
       resQuality = "unknown";
-      coverageReason = "pid_unavailable";
+      coverageReason = "internal_tool_no_process";
     }
 
     const resources: SpanEndResources = {
@@ -707,7 +713,7 @@ export default definePluginEntry({
           coverage_duration_ns: null,
           action_duration_ns: durNs.toString(),
           coverage_ratio: null,
-          coverage_reason: "pid_unavailable",
+          coverage_reason: "not_applicable",
         },
         correlation: activeSpan === null ? {
           status: "unresolved",
@@ -767,7 +773,7 @@ export default definePluginEntry({
             coverage_duration_ns: null,
             action_duration_ns: durNs.toString(),
             coverage_ratio: null,
-            coverage_reason: "pid_unavailable",
+            coverage_reason: "not_applicable",
           },
         };
         // Write to the span's run writer
@@ -970,6 +976,30 @@ function buildCompletion(
     raw_event: rawEvent,
     resource_scope: null
   };
+}
+
+function buildRuntimeResourceScope(toolName: string): ResourceScope | null {
+  if (toolName === "exec") return null;
+  if (typeof process.pid !== "number" || process.pid <= 0) return null;
+  const processStartTime = Math.max(0, Date.now() / 1000 - process.uptime());
+  return {
+    kind: "pid",
+    execution_id: null,
+    pid: process.pid,
+    root_pid: process.pid,
+    process_start_time: processStartTime,
+    root_starttime_ticks: null,
+    cgroup_path: null,
+    pid_namespace_inode: null,
+    container_id: null,
+    include_children: true,
+    source: "openclaw-runtime",
+    attribution_source: "shared-runtime-process",
+  };
+}
+
+function isSharedRuntimeScope(scope: ResourceScope | null): boolean {
+  return scope?.source === "openclaw-runtime" || scope?.attribution_source === "shared-runtime-process";
 }
 
 async function reportModel(

@@ -13,7 +13,7 @@
           "recordRawTrace": true,
           "authTokenEnv": "OPENCLAW_SCHEDULER_TOKEN",
           "logLevel": "info",
-          "executionBackend": "marker",
+          "executionBackend": "managed-wrapper",
           "launcherPath": "/opt/claw/bin/claw-launch",
           "instrumentHosts": [
             "gateway"
@@ -21,11 +21,11 @@
           "instrumentTools": [
             "exec"
           ],
-          "enableCgroup": false,
+          "enableCgroup": true,
           "enableAffinity": false,
           "enableNuma": false,
           "profilingMode": "off",
-          "securityBoundaryAccepted": false,
+          "securityBoundaryAccepted": true,
           "trace": {
             "schema_version": 6,
             "include_raw_events": true,

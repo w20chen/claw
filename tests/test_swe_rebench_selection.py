@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 from swe_rebench.config import RunnerConfig
-from swe_rebench.prepare import _ENTRYPOINT_TEMPLATE, _write_entrypoint
+from swe_rebench.prepare import _ENTRYPOINT_TEMPLATE, _PLUGIN_CONFIG, _write_entrypoint
 from swe_rebench.task_source import filter_tasks, parse_instance_ids, tasks_from_records
 from swe_rebench.runner import (
     _inspect_trace,
@@ -185,6 +185,18 @@ def test_entrypoint_uses_runtime_llm_env_and_writes_task_manifest() -> None:
     assert 'agent-stdout.txt' in _ENTRYPOINT_TEMPLATE
     assert 'model.patch' in _ENTRYPOINT_TEMPLATE
     assert 'result_summary.json' in _ENTRYPOINT_TEMPLATE
+
+
+def test_swe_rebench_plugin_config_uses_managed_wrapper_cgroup() -> None:
+    assert _PLUGIN_CONFIG["executionBackend"] == "managed-wrapper"
+    assert _PLUGIN_CONFIG["launcherPath"] == "/opt/claw/bin/claw-launch"
+    assert _PLUGIN_CONFIG["enableCgroup"] is True
+    assert _PLUGIN_CONFIG["securityBoundaryAccepted"] is True
+
+
+def test_entrypoint_installs_stable_launcher_path() -> None:
+    assert "cat > /opt/claw/bin/claw-launch" in _ENTRYPOINT_TEMPLATE
+    assert "python3 -m agent_scheduler.launcher" in _ENTRYPOINT_TEMPLATE
 
 
 def test_task_artifacts_summarizes_patch_and_result_summary(tmp_path: Path) -> None:

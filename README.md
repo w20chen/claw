@@ -28,7 +28,7 @@ Before starting the sidecar, please ensure that port 8765 is not occupied. If th
 
 ```bash
 sudo lsof -t -i :8765 | xargs -r sudo kill -9
-``
+```
 
 Install the plugin:
 

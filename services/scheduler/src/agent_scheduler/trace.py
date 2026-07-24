@@ -136,6 +136,7 @@ class AgentTestBenchTraceWriter:
             start.resource_scope if start is not None else None,
         )
         has_pid = scope is not None and scope.pid is not None
+        shared_runtime = _is_shared_runtime_scope(scope)
 
         filepath = self._file_for_run(run_id, session_id, agent_id)
         self._ensure_metadata(filepath)
@@ -174,6 +175,8 @@ class AgentTestBenchTraceWriter:
             monitor_start_wall_ns=_mon_start_wall,
             monitor_end_wall_ns=_mon_end_wall,
             has_pid=has_pid,
+            internal_tool_no_process=event.execution_id is None and not has_pid,
+            shared_runtime_process=shared_runtime,
         )
 
         # span_end
@@ -203,7 +206,7 @@ class AgentTestBenchTraceWriter:
                 "pid_role": "payload_root" if has_pid else None,
             },
             "resources": {
-                "attribution_status": _v6_attribution(sample),
+                "attribution_status": _v6_attribution(sample, scope),
                 "scope": "cgroup" if (scope is not None and scope.cgroup_path) else ("process_tree" if has_pid else "none"),
                 "quality": "unknown" if sample.sampling_quality == "unknown" else "partial",
                 "monitor_start_wall_time_ns": str(_mon_start_wall) if _mon_start_wall is not None else None,
@@ -313,7 +316,7 @@ class AgentTestBenchTraceWriter:
                 "coverage_duration_ns": None,
                 "action_duration_ns": duration_ns,
                 "coverage_ratio": None,
-                "coverage_reason": "pid_unavailable",
+                "coverage_reason": "not_applicable",
             },
         })
 
@@ -541,6 +544,8 @@ def _coverage(
     monitor_start_wall_ns: int | None,
     monitor_end_wall_ns: int | None,
     has_pid: bool,
+    internal_tool_no_process: bool = False,
+    shared_runtime_process: bool = False,
 ) -> tuple[int | None, float | None, str]:
     """Compute coverage duration, ratio, and reason.
 
@@ -549,7 +554,7 @@ def _coverage(
       coverage_ratio = coverage_duration_ns / action_duration_ns
     """
     if not has_pid:
-        return None, None, "pid_unavailable"
+        return None, None, "internal_tool_no_process" if internal_tool_no_process else "pid_unavailable"
     if monitor_start_wall_ns is None or monitor_end_wall_ns is None:
         return None, None, "clock_data_missing"
 
@@ -560,14 +565,16 @@ def _coverage(
     )
 
     if action_duration_ns <= 0:
-        return overlap_ns, None, "full_window" if overlap_ns > 0 else "pid_unavailable"
+        return overlap_ns, None, "full_window" if overlap_ns > 0 else "monitor_window_no_overlap"
 
     ratio = overlap_ns / action_duration_ns
 
-    if ratio >= 0.99:
+    if shared_runtime_process and ratio > 0.0:
+        reason = "shared_runtime_process"
+    elif ratio >= 0.99:
         reason = "full_window"
     elif ratio <= 0.0:
-        reason = "pid_unavailable"
+        reason = "monitor_window_no_overlap"
     else:
         reason = "pid_registered_late"
 
@@ -643,8 +650,19 @@ def _truncate_string(value: str, max_bytes: int) -> str:
     return truncated.decode("utf-8", errors="ignore")
 
 
-def _v6_attribution(sample: ToolRuntimeSample) -> str:
+def _is_shared_runtime_scope(scope: Any | None) -> bool:
+    if scope is None:
+        return False
+    return (
+        getattr(scope, "source", None) == "openclaw-runtime"
+        or getattr(scope, "attribution_source", None) == "shared-runtime-process"
+    )
+
+
+def _v6_attribution(sample: ToolRuntimeSample, scope: Any | None = None) -> str:
     """Map legacy attribution_status to v6 AttributionStatus."""
+    if _is_shared_runtime_scope(scope):
+        return "partially_attributed"
     mapping = {
         "pid": "attributed",
         "cgroup-v2": "attributed",

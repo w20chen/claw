@@ -356,6 +356,81 @@ def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Pa
     assert model_ends[0]["output"]["content"] == "done"
 
 
+def test_trace_marks_shared_runtime_process_scope(tmp_path: Path) -> None:
+    client, trace_dir = _trace_client(tmp_path)
+    request: dict[str, object] = {
+        "schema_version": "scheduler.v1",
+        "event_id": "evt-runtime-before",
+        "occurred_at": "2026-07-16T03:23:00Z",
+        "plugin_version": "0.1.0",
+        "run_id": "run-runtime",
+        "session_id": "session-runtime",
+        "session_key": None,
+        "agent_id": "agent-runtime",
+        "tool_call_id": "call-runtime",
+        "tool_name": "write",
+        "tool_kind": "internal",
+        "tool_input_kind": "json",
+        "operation_hint": None,
+        "derived_paths": [],
+        "params_digest": "sha256:" + "d" * 64,
+        "param_features": {
+            "serialized_size_bytes": 24,
+            "string_length": 20,
+            "list_item_count": 0,
+            "path_count": 1,
+            "has_command_like_field": False,
+        },
+        "raw_params": {"path": "x.txt"},
+        "resource_scope": {
+            "kind": "pid",
+            "pid": os.getpid(),
+            "root_pid": os.getpid(),
+            "process_start_time": None,
+            "root_starttime_ticks": None,
+            "cgroup_path": None,
+            "pid_namespace_inode": None,
+            "container_id": None,
+            "include_children": True,
+            "source": "openclaw-runtime",
+            "attribution_source": "shared-runtime-process",
+        },
+    }
+    decision = client.post("/v1/decisions/tool", json=request).json()
+    completion = {
+        "schema_version": "scheduler.v1",
+        "event_id": "evt-runtime-after",
+        "occurred_at": "2026-07-16T03:23:01Z",
+        "plugin_version": "0.1.0",
+        "run_id": "run-runtime",
+        "session_id": "session-runtime",
+        "session_key": None,
+        "agent_id": "agent-runtime",
+        "tool_call_id": "call-runtime",
+        "decision_id": decision["decision_id"],
+        "lease_id": decision["lease_id"],
+        "execution_id": None,
+        "tool_name": "write",
+        "duration_ms": 1000,
+        "succeeded": True,
+        "error_type": None,
+        "error_digest": None,
+        "result_size_bytes": 2,
+        "raw_result": "ok",
+    }
+
+    assert client.post("/v1/events/tool-completed", json=completion).json() == {"stored": True}
+
+    records = _read_trace_records(trace_dir)
+    tool_end = next(r for r in records if r.get("record_type") == "span_end" and r.get("kind") == "tool")
+    assert tool_end["execution"]["payload_pid"] == os.getpid()
+    assert tool_end["resources"]["attribution_status"] == "partially_attributed"
+    assert tool_end["resources"]["coverage_reason"] in {
+        "shared_runtime_process",
+        "monitor_window_no_overlap",
+    }
+
+
 def test_proxy_capture_without_model_hook_does_not_write_standalone_trace(tmp_path: Path, monkeypatch) -> None:
     client, trace_dir = _trace_proxy_client(tmp_path)
     # Remove any existing trace files

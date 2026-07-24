@@ -59,6 +59,10 @@ export type CoverageReason =
   | "pid_registered_late"
   | "monitor_stopped_early"
   | "pid_unavailable"
+  | "internal_tool_no_process"
+  | "shared_runtime_process"
+  | "monitor_window_no_overlap"
+  | "not_applicable"
   | "cgroup_unavailable"
   | "monitor_error"
   | "clock_data_missing";
