@@ -338,15 +338,20 @@ bundle:
     )
     config = RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
     task = TaskDef(instance_id="task-1", image="image:latest", problem_statement="fix")
+    trace_dir = tmp_path / "traces" / "task-1"
+    trace_dir.mkdir(parents=True)
+    (trace_dir / "stale.txt").write_text("old", encoding="utf-8")
     called: dict[str, object] = {}
 
     def fake_host_runner(**kwargs):
         called.update(kwargs)
+        assert kwargs["trace_dir"].is_dir()
+        assert not (kwargs["trace_dir"] / "stale.txt").exists()
         return ContainerResult(
             task_id="task-1",
             image="image:latest",
             exit_code=0,
-            trace_dir=tmp_path / "traces" / "task-1",
+            trace_dir=trace_dir,
         )
 
     import swe_rebench.runner as runner
@@ -357,7 +362,7 @@ bundle:
         client=object(),
         task=task,
         bundle_dir=tmp_path / "bundle",
-        trace_dir=tmp_path / "traces" / "task-1",
+        trace_dir=trace_dir,
         config=config,
     )
 

@@ -393,6 +393,8 @@ def _run_one(
     config: RunnerConfig,
 ) -> ContainerResult:
     """Execute a single task container (called in worker thread)."""
+    _reset_task_trace_dir(config.output.trace_root, trace_dir)
+
     if config.runtime.mode == "host-openclaw-sandbox":
         return run_host_sandbox_task(
             task=task,
@@ -403,7 +405,6 @@ def _run_one(
 
     retries = config.batch.retry_failed + 1
     last_result: ContainerResult | None = None
-    _reset_task_trace_dir(config.output.trace_root, trace_dir)
 
     for attempt in range(1, retries + 1):
         if attempt > 1:
