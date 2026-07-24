@@ -9,6 +9,7 @@ from swe_rebench.host_sandbox import (
     _ensure_openclaw_sandbox_image,
     _openclaw_config,
     _openclaw_env,
+    _reset_directory,
     _write_task_inputs,
 )
 from swe_rebench.task_source import TaskDef
@@ -453,6 +454,43 @@ def test_host_sandbox_builds_default_sandbox_image_when_missing(monkeypatch, tmp
         ["/usr/bin/docker", "build", "-t", "openclaw-sandbox:bookworm-slim", "-"],
     ]
     assert (tmp_path / "sandbox-image-build.log").exists()
+
+
+def test_host_sandbox_workspace_reset_falls_back_to_docker_on_permission_error(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspaces" / "task-1"
+    workspace.mkdir(parents=True)
+    calls: list[list[str]] = []
+
+    def fake_rmtree(path, **kwargs):
+        raise PermissionError(str(path))
+
+    def fake_which(name: str):
+        return "/usr/bin/docker" if name == "docker" else None
+
+    class Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return Result()
+
+    monkeypatch.setattr("swe_rebench.host_sandbox.shutil.rmtree", fake_rmtree)
+    monkeypatch.setattr("swe_rebench.host_sandbox.shutil.which", fake_which)
+    monkeypatch.setattr("swe_rebench.host_sandbox.subprocess.run", fake_run)
+
+    _reset_directory(workspace, docker_cleanup_image="task-image:latest")
+
+    assert calls
+    cleanup_cmd = calls[0]
+    assert cleanup_cmd[:3] == ["/usr/bin/docker", "run", "--rm"]
+    assert f"TARGET={workspace.name}" in cleanup_cmd
+    assert str(workspace.parent.resolve()) + ":/host_parent" in cleanup_cmd
+    assert "task-image:latest" in cleanup_cmd
 
 
 def test_runner_config_parses_docker_bool_strings(tmp_path: Path) -> None:

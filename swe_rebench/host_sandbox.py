@@ -43,7 +43,7 @@ def run_host_sandbox_task(
     error: str | None = None
 
     try:
-        _reset_directory(workspace)
+        _reset_directory(workspace, docker_cleanup_image=task.image)
         _reset_directory(openclaw_home)
         _export_testbed_from_image(task.image, workspace, config.docker.pull_policy)
         _install_sandbox_launcher(workspace, bundle_dir)
@@ -688,10 +688,75 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def _reset_directory(path: Path) -> None:
+def _reset_directory(path: Path, *, docker_cleanup_image: str | None = None) -> None:
     if path.exists():
-        shutil.rmtree(path)
+        try:
+            shutil.rmtree(path, onerror=_chmod_and_retry)
+        except PermissionError:
+            if docker_cleanup_image is None:
+                raise
+            _reset_directory_with_docker(path, docker_cleanup_image)
     path.mkdir(parents=True, exist_ok=True)
+
+
+def _chmod_and_retry(function: Any, path: str, _exc_info: Any) -> None:
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
+    function(path)
+
+
+def _reset_directory_with_docker(path: Path, image: str) -> None:
+    docker = _require_executable("docker")
+    target = path.resolve()
+    parent = target.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    parent_resolved = parent.resolve()
+    if target.parent != parent_resolved:
+        target = parent_resolved / target.name
+    try:
+        target.relative_to(parent_resolved)
+    except ValueError as exc:
+        raise RuntimeError(f"refusing docker cleanup outside parent: {target}") from exc
+    if target.name in {"", ".", ".."} or any(sep in target.name for sep in ("/", "\\")):
+        raise RuntimeError(f"refusing unsafe docker cleanup target name: {target.name!r}")
+
+    uid = os.getuid() if hasattr(os, "getuid") else 0
+    gid = os.getgid() if hasattr(os, "getgid") else 0
+    script = (
+        'set -eu\n'
+        'case "$TARGET" in ""|"."|".."|*/*) exit 64 ;; esac\n'
+        'rm -rf "/host_parent/$TARGET"\n'
+        'mkdir -p "/host_parent/$TARGET"\n'
+        'chown "$HOST_UID:$HOST_GID" "/host_parent/$TARGET" 2>/dev/null || true\n'
+    )
+    result = subprocess.run(
+        [
+            docker,
+            "run",
+            "--rm",
+            "-e",
+            f"TARGET={target.name}",
+            "-e",
+            f"HOST_UID={uid}",
+            "-e",
+            f"HOST_GID={gid}",
+            "-v",
+            f"{parent_resolved}:/host_parent",
+            image,
+            "sh",
+            "-c",
+            script,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"docker_workspace_cleanup_failed exit={result.returncode} "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
 
 
 def _write_text(path: Path, text: str) -> None:
