@@ -212,16 +212,7 @@ class DockerExecObserver:
             return
         while not self._stop.is_set():
             process = subprocess.Popen(
-                [
-                    self.docker_bin,
-                    "events",
-                    "--format",
-                    "{{json .}}",
-                    "--filter",
-                    "type=exec",
-                    "--filter",
-                    "event=exec_start",
-                ],
+                _docker_events_command(self.docker_bin),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 text=True,
@@ -314,6 +305,19 @@ class _UnixHTTPConnection(http.client.HTTPConnection):
         sock.settimeout(self.timeout)
         sock.connect(self.socket_path)
         self.sock = sock
+
+
+def _docker_events_command(docker_bin: str) -> list[str]:
+    return [
+        docker_bin,
+        "events",
+        "--format",
+        "{{json .}}",
+        "--filter",
+        "type=container",
+        "--filter",
+        "event=exec_start",
+    ]
 
 
 def _exec_command(info: dict[str, Any] | None) -> str | None:

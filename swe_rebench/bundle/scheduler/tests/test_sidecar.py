@@ -12,7 +12,7 @@ from agent_scheduler.api.app import create_app
 from agent_scheduler.api.dependencies import build_state
 from agent_scheduler.config import SchedulerConfig
 from agent_scheduler.llm_proxy import _forward_headers, _upstream_url
-from agent_scheduler.monitoring.docker_exec import DockerExecObserver
+from agent_scheduler.monitoring.docker_exec import DockerExecObserver, _docker_events_command
 from agent_scheduler.monitoring.tool_runtime import _relative_timeline
 
 
@@ -528,6 +528,22 @@ def test_docker_exec_event_uses_exec_id_attribute_not_container_id() -> None:
 
     assert inspected == ["exec-real-id"]
     assert observer._records[0].exec_id == "exec-real-id"
+
+
+def test_docker_exec_observer_subscribes_to_container_exec_start_events() -> None:
+    command = _docker_events_command("docker")
+
+    assert command == [
+        "docker",
+        "events",
+        "--format",
+        "{{json .}}",
+        "--filter",
+        "type=container",
+        "--filter",
+        "event=exec_start",
+    ]
+    assert "type=exec" not in command
 
 
 def test_exec_tool_can_use_shared_sandbox_cgroup_fallback(tmp_path: Path) -> None:
