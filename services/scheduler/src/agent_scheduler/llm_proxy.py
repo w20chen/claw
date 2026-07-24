@@ -115,6 +115,10 @@ async def proxy_chat_completions(
             return JSONResponse({"error": {"message": str(exc), "type": "proxy_error"}}, status_code=502)
 
     response_payload = _json_or_text(response.content)
+    # Merge reasoning_content → content for reasoning models (deepseek-v4-flash, etc.)
+    # so OpenClaw sees readable text instead of empty content.
+    _merge_reasoning(response_payload)
+    response_content = json.dumps(response_payload).encode("utf-8") if isinstance(response_payload, dict) else response.content
     _record_proxy_trace(
         trace_writer,
         action_id=action_id,
@@ -126,7 +130,7 @@ async def proxy_chat_completions(
         error=None if response.status_code < 400 else f"upstream_http_{response.status_code}",
     )
     return Response(
-        content=response.content,
+        content=response_content,
         status_code=response.status_code,
         headers=_response_headers(response),
         media_type=response.headers.get("content-type"),
@@ -157,19 +161,22 @@ async def _stream_chat(
                 async for chunk in response.aiter_bytes():
                     sse_buffer += chunk
                     # Extract complete SSE events (delimited by double-newline).
-                    # Keep any trailing partial event in the buffer for the
-                    # next iteration so fragments are never dropped.
                     events, sse_buffer = _parse_sse_buffer(sse_buffer)
                     for event in events:
                         if event is not None:
+                            # Merge reasoning_content → content for reasoning models.
+                            _merge_reasoning(event)
                             chunks.append(event)
-                    yield chunk
+                    # Re-serialize modified events as SSE and yield.
+                    yield _serialize_sse(events, chunk)
         # Flush any remaining partial event after the stream ends.
         if sse_buffer:
             events, _ = _parse_sse_buffer(sse_buffer + b"\n\n")
             for event in events:
                 if event is not None:
+                    _merge_reasoning(event)
                     chunks.append(event)
+            yield _serialize_sse(events, b"")
     except Exception as exc:
         status_code = 502
         error = str(exc)
@@ -237,6 +244,44 @@ def _translate_model(payload: dict[str, Any], config: SchedulerConfig) -> None:
         return
     if isinstance(payload.get("model"), str) and payload["model"] == expose:
         payload["model"] = upstream
+
+
+def _merge_reasoning(body: dict[str, Any] | None) -> None:
+    """Merge ``reasoning_content`` into ``content`` for reasoning models.
+
+    Reasoning models (deepseek-v4-flash, o1, etc.) output thinking text in
+    ``reasoning_content`` and leave ``content`` empty.  OpenClaw only reads
+    ``content``, so we copy the reasoning text there before forwarding.
+    """
+    if not isinstance(body, dict):
+        return
+    for choice in body.get("choices", []):
+        if not isinstance(choice, dict):
+            continue
+        # Non-streaming: message.content
+        msg = choice.get("message")
+        if isinstance(msg, dict):
+            rc = msg.get("reasoning_content")
+            if rc and not msg.get("content"):
+                msg["content"] = rc
+        # Streaming: delta.content
+        delta = choice.get("delta")
+        if isinstance(delta, dict):
+            rc = delta.get("reasoning_content")
+            if rc and not delta.get("content"):
+                delta["content"] = rc
+
+
+def _serialize_sse(events: list[dict[str, Any] | None], raw_chunk: bytes) -> bytes:
+    """Re-serialize modified SSE events, preserving [DONE] markers."""
+    parts: list[bytes] = []
+    for event in events:
+        if event is None:
+            parts.append(b"data: [DONE]\n\n")
+        else:
+            parts.append(f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode("utf-8"))
+    result = b"".join(parts)
+    return result if result else raw_chunk
 
 
 def _normalize_models_response(raw: bytes) -> dict[str, Any] | None:
