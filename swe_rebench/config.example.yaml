@@ -46,6 +46,14 @@ docker:
   # Extra capabilities to grant (e.g. ["SYS_PTRACE"]).
   cap_add: []
 
+  # Enable these when you need complete per-tool cgroup v2 sampling.
+  # They grant the task container write access to cgroupfs so claw-launch can
+  # create /sys/fs/cgroup/claw/<execution_id> instead of borrowing the
+  # container root cgroup.
+  privileged: false
+  cgroupns_mode: ""
+  cgroup_mount_rw: false
+
 # ── Batch Execution ───────────────────────────────────────────────
 batch:
   # Maximum concurrent containers.

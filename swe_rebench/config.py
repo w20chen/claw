@@ -23,6 +23,14 @@ def _env_subst(value: str) -> str:
     return pattern.sub(_repl, value)
 
 
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 @dataclass
 class LLMConfig:
     api_key: str = ""
@@ -52,6 +60,9 @@ class DockerConfig:
     dns_servers: list[str] = field(default_factory=list)
     pull_policy: str = "missing"
     cap_add: list[str] = field(default_factory=list)
+    privileged: bool = False
+    cgroupns_mode: str = ""
+    cgroup_mount_rw: bool = False
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "DockerConfig":
@@ -63,6 +74,9 @@ class DockerConfig:
             dns_servers=list(d.get("dns_servers", [])),
             pull_policy=str(d.get("pull_policy", "missing")),
             cap_add=list(d.get("cap_add", [])),
+            privileged=_as_bool(d.get("privileged", False)),
+            cgroupns_mode=str(d.get("cgroupns_mode", "")),
+            cgroup_mount_rw=_as_bool(d.get("cgroup_mount_rw", False)),
         )
 
 

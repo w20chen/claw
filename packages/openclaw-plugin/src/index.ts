@@ -1,5 +1,6 @@
 import {definePluginEntry, type HookApi} from "openclaw/plugin-sdk/plugin-entry";
 import {randomUUID} from "node:crypto";
+import {readFileSync} from "node:fs";
 import {SidecarClient} from "./client.js";
 import {loadConfig, isRecord} from "./config.js";
 import {CorrelationMap} from "./correlation.js";
@@ -989,20 +990,38 @@ function buildRuntimeResourceScope(toolName: string): ResourceScope | null {
   if (toolName === "exec") return null;
   if (typeof process.pid !== "number" || process.pid <= 0) return null;
   const processStartTime = Math.max(0, Date.now() / 1000 - process.uptime());
+  const cgroupPath = readSelfCgroupPath();
   return {
-    kind: "pid",
+    kind: cgroupPath === null ? "pid" : "cgroup-v2",
     execution_id: null,
     pid: process.pid,
     root_pid: process.pid,
     process_start_time: processStartTime,
     root_starttime_ticks: null,
-    cgroup_path: null,
+    cgroup_path: cgroupPath,
     pid_namespace_inode: null,
     container_id: null,
     include_children: true,
     source: "openclaw-runtime",
     attribution_source: "shared-runtime-process",
   };
+}
+
+function readSelfCgroupPath(): string | null {
+  if (process.platform === "win32") return null;
+  try {
+    const text = readFileSync("/proc/self/cgroup", "utf8");
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line.startsWith("0::")) continue;
+      const path = line.slice(3);
+      if (!path || path === "/") return "/sys/fs/cgroup";
+      return `/sys/fs/cgroup${path}`;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function isSharedRuntimeScope(scope: ResourceScope | null): boolean {

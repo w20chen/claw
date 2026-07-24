@@ -357,6 +357,10 @@ def test_agent_test_bench_trace_jsonl_records_tool_and_model_events(tmp_path: Pa
     assert tool_end["output"]["exit_code"] == 0
     assert tool_end["resources"]["cpu_time_s"] is not None
     assert tool_end["resources"]["rss_peak_bytes"] is not None
+    assert "sampling_interval_ms" in tool_end["resources"]
+    assert tool_end["resources"]["sampling_point_count"] >= 1
+    assert isinstance(tool_end["resources"]["resource_timeline"], list)
+    assert tool_end["resources"]["resource_timeline_truncated"] is False
 
     model_starts = [r for r in records if r.get("record_type") == "span_start" and r.get("kind") == "llm"]
     assert len(model_starts) == 1
@@ -561,8 +565,18 @@ def test_model_hook_record_is_enriched_from_proxy_capture(tmp_path: Path, monkey
                     "choices": [
                         {
                             "index": 0,
-                            "message": {"role": "assistant", "content": "world"},
-                            "finish_reason": "stop",
+                            "message": {
+                                "role": "assistant",
+                                "content": "world",
+                                "tool_calls": [
+                                    {
+                                        "id": "call-proxy-tool",
+                                        "type": "function",
+                                        "function": {"name": "exec", "arguments": '{"command":"pwd"}'},
+                                    }
+                                ],
+                            },
+                            "finish_reason": "tool_calls",
                         }
                     ],
                 },
@@ -617,6 +631,9 @@ def test_model_hook_record_is_enriched_from_proxy_capture(tmp_path: Path, monkey
     assert llm_starts[0]["session_id"] == "session-proxy"
     assert llm_starts[0]["agent_id"] == "main"
     assert llm_starts[0]["input"]["messages"] == [{"role": "user", "content": "hello"}]
+    llm_ends = [r for r in records if r.get("record_type") == "span_end" and r.get("kind") == "llm"]
+    assert llm_ends[0]["output"]["content"]["content"] == "world"
+    assert llm_ends[0]["output"]["content"]["tool_calls"][0]["id"] == "call-proxy-tool"
 
 
 def test_llm_proxy_reconstructs_streaming_tool_calls(tmp_path: Path, monkeypatch) -> None:

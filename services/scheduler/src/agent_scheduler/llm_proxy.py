@@ -498,13 +498,12 @@ def _content_from_response(response_payload: Any | None) -> Any | None:
     if not isinstance(message, dict):
         return None
     content = message.get("content")
+    tool_calls = message.get("tool_calls")
+    if tool_calls:
+        return {"content": content or "", "tool_calls": tool_calls}
     # If there is real text content, return it.
     if content:
         return content
-    # For tool-call-only turns the meaningful output is the tool calls.
-    tool_calls = message.get("tool_calls")
-    if tool_calls:
-        return {"tool_calls": tool_calls}
     # Return content even when empty/falsy (preserves the empty string
     # for callers that need to distinguish "no text" from "no response").
     return content
@@ -539,11 +538,11 @@ def _content_from_stream_chunks(chunks: list[dict[str, Any]]) -> Any:
     """Extract meaningful output from streamed LLM response chunks."""
     message = _message_from_stream_chunks(chunks)
     content = message.get("content")
-    if content:
-        return content
     tool_calls = message.get("tool_calls")
     if tool_calls:
-        return {"tool_calls": tool_calls}
+        return {"content": content or "", "tool_calls": tool_calls}
+    if content:
+        return content
     return content
 
 

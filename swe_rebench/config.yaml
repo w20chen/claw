@@ -42,6 +42,11 @@ docker:
   # Extra capabilities to grant (e.g. ["SYS_PTRACE"]).
   cap_add: []
 
+  # Required for per-tool cgroup v2 creation inside the task container.
+  privileged: true
+  cgroupns_mode: "host"
+  cgroup_mount_rw: true
+
 # ── Batch Execution ───────────────────────────────────────────────
 batch:
   # Maximum concurrent containers.

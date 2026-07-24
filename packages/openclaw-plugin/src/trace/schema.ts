@@ -172,6 +172,25 @@ export interface SpanEndResources {
   memory_rss_bytes_after?: number | null;
   disk_read_bytes_delta?: number | null;
   disk_write_bytes_delta?: number | null;
+  net_rx_bytes_delta?: number | null;
+  net_tx_bytes_delta?: number | null;
+  ctx_switches_delta?: number | null;
+  cpu_utilization_avg_cores?: number | null;
+  cpu_utilization_avg_pct?: number | null;
+  disk_read_bytes_per_s?: number | null;
+  disk_write_bytes_per_s?: number | null;
+  net_rx_bytes_per_s?: number | null;
+  net_tx_bytes_per_s?: number | null;
+  sampling_interval_ms?: number | null;
+  sampling_point_count?: number | null;
+  sampling_quality?: string | null;
+  resource_timeline?: unknown[] | null;
+  resource_timeline_truncated?: boolean | null;
+  resource_class?: string | null;
+  target_pid?: number | null;
+  process_count_before?: number | null;
+  process_count_after?: number | null;
+  monitor_source?: string | null;
 }
 
 export interface SpanEndRecord extends SpanIdentity {

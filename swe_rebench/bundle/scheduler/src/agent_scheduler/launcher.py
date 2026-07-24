@@ -315,8 +315,12 @@ def _cgroup_root_candidates() -> list[str]:
     """
     candidates: list[str] = []
 
-    # Priority 1: traditional delegated root.
-    if _try_candidate_parent("/sys/fs/cgroup/claw"):
+    # Priority 1: traditional delegated root.  In privileged Docker
+    # containers this directory may not exist yet, but /sys/fs/cgroup is
+    # writable; include it so _create_cgroup_at can create the claw root.
+    if _try_candidate_parent("/sys/fs/cgroup"):
+        candidates.append("/sys/fs/cgroup/claw")
+    elif _try_candidate_parent("/sys/fs/cgroup/claw"):
         candidates.append("/sys/fs/cgroup/claw")
 
     # Priority 2: systemd user manager slice.

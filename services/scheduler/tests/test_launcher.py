@@ -133,6 +133,14 @@ def test_launcher_required_cgroup_overrides_profiling_disable(monkeypatch, tmp_p
     assert cgroup_path == str(tmp_path / "exec_1")
 
 
+def test_launcher_uses_cgroup_root_when_cgroupfs_is_writable(monkeypatch) -> None:
+    monkeypatch.setattr(launcher, "_supports_posix_controls", lambda: True)
+    monkeypatch.setattr(launcher, "_try_candidate_parent", lambda path: path == "/sys/fs/cgroup")
+    monkeypatch.setattr(launcher, "_start_user_manager", lambda: None)
+
+    assert launcher._cgroup_root_candidates()[0] == "/sys/fs/cgroup/claw"
+
+
 def test_launcher_required_cgroup_fails_without_posix(monkeypatch) -> None:
     monkeypatch.setattr(launcher, "_supports_posix_controls", lambda: False)
     monkeypatch.setenv("CLAW_CGROUP_REQUIRED", "1")

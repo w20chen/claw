@@ -208,7 +208,7 @@ class AgentTestBenchTraceWriter:
             "resources": {
                 "attribution_status": _v6_attribution(sample, scope),
                 "scope": "cgroup" if (scope is not None and scope.cgroup_path) else ("process_tree" if has_pid else "none"),
-                "quality": "unknown" if sample.sampling_quality == "unknown" else "partial",
+                "quality": _v6_quality(sample.sampling_quality, _cov_reason),
                 "monitor_start_wall_time_ns": str(_mon_start_wall) if _mon_start_wall is not None else None,
                 "monitor_end_wall_time_ns": str(_mon_end_wall) if _mon_end_wall is not None else None,
                 "monitor_start_monotonic_ns": str(_mon_start_mono) if _mon_start_mono is not None else None,
@@ -219,6 +219,29 @@ class AgentTestBenchTraceWriter:
                 "coverage_reason": _cov_reason,
                 "cpu_time_s": sample.cpu_time_delta_s,
                 "rss_peak_bytes": sample.rss_bytes_peak,
+                "memory_rss_bytes_before": sample.rss_bytes_before,
+                "memory_rss_bytes_after": sample.rss_bytes_after,
+                "disk_read_bytes_delta": sample.read_bytes_delta,
+                "disk_write_bytes_delta": sample.write_bytes_delta,
+                "net_rx_bytes_delta": sample.net_rx_bytes_delta,
+                "net_tx_bytes_delta": sample.net_tx_bytes_delta,
+                "ctx_switches_delta": sample.ctx_switches_delta,
+                "cpu_utilization_avg_cores": sample.cpu_utilization_avg_cores,
+                "cpu_utilization_avg_pct": sample.cpu_utilization_avg_pct,
+                "disk_read_bytes_per_s": sample.disk_read_bytes_per_s,
+                "disk_write_bytes_per_s": sample.disk_write_bytes_per_s,
+                "net_rx_bytes_per_s": sample.net_rx_bytes_per_s,
+                "net_tx_bytes_per_s": sample.net_tx_bytes_per_s,
+                "sampling_interval_ms": sample.sampling_interval_ms,
+                "sampling_point_count": sample.sampling_point_count,
+                "sampling_quality": sample.sampling_quality,
+                "resource_timeline": sample.resource_timeline,
+                "resource_timeline_truncated": sample.resource_timeline_truncated,
+                "resource_class": sample.resource_class,
+                "target_pid": sample.target_pid,
+                "process_count_before": sample.process_count_before,
+                "process_count_after": sample.process_count_after,
+                "monitor_source": sample.monitor_source,
             },
         })
 
@@ -287,6 +310,8 @@ class AgentTestBenchTraceWriter:
             "execution": {"mode": None, "execution_id": None},
         })
 
+        output_content = _llm_output_content(event.raw_output, proxy_data)
+
         self._append(filepath, {
             "schema_version": 6,
             "record_type": "span_end",
@@ -303,7 +328,7 @@ class AgentTestBenchTraceWriter:
             "monotonic_time_ns": mono_end_ns,
             "duration_ns": duration_ns,
             "status": {"code": status_code, "message": None},
-            "output": {"content": _first_present(event.raw_output, proxy_data.get("content"))},
+            "output": {"content": output_content},
             "execution": {"mode": None, "execution_id": None},
             "resources": {
                 "attribution_status": "not_applicable",
@@ -323,9 +348,9 @@ class AgentTestBenchTraceWriter:
         # Register tool_call_id → parent span mapping so child tool spans
         # can resolve their parent_span_id.  Handles both direct OpenAI-style
         # tool_calls and content-wrapped proxy formats.
-        output_content = _first_present(event.raw_output, proxy_data.get("content"))
-        for tc_id in _extract_tool_call_ids(output_content):
-            self._tool_parent_map[tc_id] = span_id
+        for candidate in (output_content, event.raw_output, proxy_data.get("content"), proxy_data.get("raw_response")):
+            for tc_id in _extract_tool_call_ids(candidate):
+                self._tool_parent_map[tc_id] = span_id
 
     def record_llm_proxy_call(
         self,
@@ -479,6 +504,60 @@ def _first_present(*values: Any) -> Any | None:
     return None
 
 
+def _llm_output_content(raw_output: Any | None, proxy_data: dict[str, Any]) -> Any | None:
+    proxy_content = proxy_data.get("content")
+    raw_response = proxy_data.get("raw_response")
+    tool_calls: list[Any] = []
+    for candidate in (proxy_content, raw_response, raw_output):
+        tool_calls = _extract_tool_calls(candidate)
+        if tool_calls:
+            break
+    if not tool_calls:
+        return _first_present(raw_output, proxy_content, raw_response)
+
+    text_content = _first_present(
+        _extract_text_content(raw_output),
+        _extract_text_content(proxy_content),
+        _extract_text_content(raw_response),
+    )
+    return {
+        "content": text_content or "",
+        "tool_calls": tool_calls,
+    }
+
+
+def _extract_text_content(value: Any | None) -> Any | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, dict):
+        return value
+    content = value.get("content")
+    if content not in (None, ""):
+        return content
+    choices = value.get("choices")
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        message = choices[0].get("message") or choices[0].get("delta")
+        if isinstance(message, dict) and message.get("content") not in (None, ""):
+            return message.get("content")
+    return None
+
+
+def _extract_tool_calls(output_content: Any) -> list[Any]:
+    if isinstance(output_content, dict):
+        tool_calls = output_content.get("tool_calls")
+        if isinstance(tool_calls, list):
+            return tool_calls
+        for choice in _list_value(output_content.get("choices")):
+            if not isinstance(choice, dict):
+                continue
+            msg = choice.get("message") or choice.get("delta")
+            if isinstance(msg, dict) and isinstance(msg.get("tool_calls"), list):
+                return msg["tool_calls"]
+    return []
+
+
 def _extract_tool_call_ids(output_content: Any) -> list[str]:
     """Extract tool_call IDs from an LLM output content value.
 
@@ -490,17 +569,7 @@ def _extract_tool_call_ids(output_content: Any) -> list[str]:
     ids: list[str] = []
     if not isinstance(output_content, dict):
         return ids
-    # Direct tool_calls wrapper (most common proxy format).
-    tool_calls = output_content.get("tool_calls")
-    if isinstance(tool_calls, list):
-        ids.extend(_collect_ids(tool_calls))
-    # Raw API response shape (choices[0].message.tool_calls).
-    for choice in _list_value(output_content.get("choices")):
-        if not isinstance(choice, dict):
-            continue
-        msg = choice.get("message")
-        if isinstance(msg, dict):
-            ids.extend(_collect_ids(_list_value(msg.get("tool_calls"))))
+    ids.extend(_collect_ids(_extract_tool_calls(output_content)))
     # Deduplicate while preserving order.
     seen: set[str] = set()
     unique: list[str] = []
@@ -670,3 +739,11 @@ def _v6_attribution(sample: ToolRuntimeSample, scope: Any | None = None) -> str:
         "pid-unavailable": "failed",
     }
     return mapping.get(sample.attribution_status, "unknown")
+
+
+def _v6_quality(sampling_quality: str, coverage_reason: str | None) -> str:
+    if sampling_quality in {"unknown", "unattributed", "unavailable"}:
+        return "unknown"
+    if coverage_reason == "full_window":
+        return "complete"
+    return "partial"

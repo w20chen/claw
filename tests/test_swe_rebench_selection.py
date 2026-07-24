@@ -277,6 +277,31 @@ def test_entrypoint_installs_stable_launcher_path() -> None:
     assert "python3 -m agent_scheduler.launcher" in _ENTRYPOINT_TEMPLATE
 
 
+def test_runner_config_enables_complete_cgroup_sampling() -> None:
+    config = RunnerConfig.from_yaml("swe_rebench/config.yaml")
+
+    assert config.docker.privileged is True
+    assert config.docker.cgroupns_mode == "host"
+    assert config.docker.cgroup_mount_rw is True
+
+
+def test_runner_config_parses_docker_bool_strings(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+docker:
+  privileged: "false"
+  cgroup_mount_rw: "true"
+""",
+        encoding="utf-8",
+    )
+
+    config = RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
+
+    assert config.docker.privileged is False
+    assert config.docker.cgroup_mount_rw is True
+
+
 def test_task_artifacts_summarizes_patch_and_result_summary(tmp_path: Path) -> None:
     (tmp_path / "model.patch").write_text("diff --git a/a b/a\n", encoding="utf-8")
     (tmp_path / "agent-cwd.txt").write_text("/testbed\n", encoding="utf-8")

@@ -128,6 +128,8 @@ def run_container(
         "LLM_UPSTREAM_BASE_URL": llm_upstream_url,
         "LLM_MODEL": llm_model,
         "OPENCLAW_MODEL_REF": openclaw_model_ref,
+        "CLAW_CGROUP_REQUIRED": "1",
+        "CLAW_CGROUP_ROOT": "/sys/fs/cgroup/claw",
     }
     if env_extra:
         environment.update(env_extra)
@@ -136,6 +138,8 @@ def run_container(
         str(bundle_dir.resolve()): {"bind": "/claw", "mode": "ro"},
         str(trace_dir.resolve()): {"bind": "/traces", "mode": "rw"},
     }
+    if config.cgroup_mount_rw:
+        volumes["/sys/fs/cgroup"] = {"bind": "/sys/fs/cgroup", "mode": "rw"}
 
     if client is not None:
         return _run_container_sdk(
@@ -178,6 +182,8 @@ def _run_container_sdk(
             network_mode=config.network_mode,
             cap_add=config.cap_add if config.cap_add else None,
             dns=config.dns_servers if config.dns_servers else None,
+            privileged=config.privileged,
+            cgroupns=config.cgroupns_mode or None,
         )
         container_id = container.id
         _log(f"[{task_id}] container {container_id[:12]} started")
@@ -260,6 +266,11 @@ def _run_container_cli(
     # Caps
     for cap in config.cap_add:
         cmd.extend(["--cap-add", cap])
+
+    if config.privileged:
+        cmd.append("--privileged")
+    if config.cgroupns_mode:
+        cmd.extend(["--cgroupns", config.cgroupns_mode])
 
     cmd.append(image)
 

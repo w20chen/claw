@@ -30,10 +30,15 @@ Expected record types:
 Useful fields:
 
 - `input.messages`: LLM request messages when proxy capture is active.
-- `output.content`: LLM or tool output.
+- `output.content`: LLM output. When the model emits tool calls, this may be
+  an object containing both `content` and `tool_calls`.
 - `input.requested_args`: tool input when `recordRawTrace: true`.
 - `resources.attribution_status`: resource attribution status.
 - `resources.cpu_time_s`, `resources.rss_peak_bytes`: sampled resource data.
+- `resources.sampling_interval_ms`, `resources.sampling_point_count`,
+  `resources.sampling_quality`: resource sampler cadence and quality.
+- `resources.resource_timeline`: per-sample resource timeline, capped by
+  `AGENT_SCHEDULER_RESOURCE_TIMELINE_MAX_POINTS`.
 
 Coverage reasons distinguish attribution failures from expected shared scopes:
 
@@ -43,5 +48,12 @@ Coverage reasons distinguish attribution failures from expected shared scopes:
   OpenClaw runtime process, not a dedicated tool process.
 - `monitor_window_no_overlap`: a PID/cgroup existed, but the sampler did not
   capture an overlapping resource window.
+
+For complete cgroup sampling in SWE-Rebench, the task container must be able
+to create per-execution cgroups under `/sys/fs/cgroup/claw`. The default
+`swe_rebench/config.yaml` enables the required privileged Docker mode,
+host cgroup namespace, and read-write cgroupfs mount. If those permissions are
+removed, `CLAW_CGROUP_REQUIRED=1` makes launcher startup fail instead of
+silently recording the container root cgroup as if it were per-tool data.
 
 The JSON Schema contracts remain the source of truth for protocol details.
