@@ -170,8 +170,11 @@ async def _stream_chat(
                             # Merge reasoning_content → content for reasoning models.
                             _merge_reasoning(event)
                             chunks.append(event)
-                    # Re-serialize modified events as SSE and yield.
-                    yield _serialize_sse(events, chunk)
+                    if events:
+                        # Only forward complete SSE events. Forwarding raw
+                        # partial chunks corrupts JSON when the event is later
+                        # re-serialized after its remaining bytes arrive.
+                        yield _serialize_sse(events)
         # Flush any remaining partial event after the stream ends.
         if sse_buffer:
             events, _ = _parse_sse_buffer(sse_buffer + b"\n\n")
@@ -179,7 +182,8 @@ async def _stream_chat(
                 if event is not None:
                     _merge_reasoning(event)
                     chunks.append(event)
-            yield _serialize_sse(events, b"")
+            if events:
+                yield _serialize_sse(events)
     except Exception as exc:
         status_code = 502
         error = str(exc)
@@ -328,7 +332,7 @@ def _merge_reasoning(body: dict[str, Any] | None) -> None:
                 delta["content"] = rc
 
 
-def _serialize_sse(events: list[dict[str, Any] | None], raw_chunk: bytes) -> bytes:
+def _serialize_sse(events: list[dict[str, Any] | None]) -> bytes:
     """Re-serialize modified SSE events, preserving [DONE] markers."""
     parts: list[bytes] = []
     for event in events:
@@ -336,8 +340,7 @@ def _serialize_sse(events: list[dict[str, Any] | None], raw_chunk: bytes) -> byt
             parts.append(b"data: [DONE]\n\n")
         else:
             parts.append(f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode("utf-8"))
-    result = b"".join(parts)
-    return result if result else raw_chunk
+    return b"".join(parts)
 
 
 def _normalize_models_response(raw: bytes) -> dict[str, Any] | None:
