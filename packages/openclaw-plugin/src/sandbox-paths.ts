@@ -20,11 +20,18 @@ export function normalizeSandboxToolParams(
     ?? "/workspace";
   if (hostWorkspace === null) return {params, changed: false};
   const targetWorkspace = usesContainerWorkspace(toolName) ? containerWorkspace : null;
+  const containerAliases = containerWorkspaceAliases(hostWorkspace, containerWorkspace);
 
   let changed = false;
-  const normalized = rewritePathFields(params, hostWorkspace, targetWorkspace, (didChange) => {
-    changed = changed || didChange;
-  });
+  const normalized = rewritePathFields(
+    params,
+    hostWorkspace,
+    containerAliases,
+    targetWorkspace,
+    (didChange) => {
+      changed = changed || didChange;
+    }
+  );
 
   if (toolName === "exec") {
     if (normalized.host === "gateway") {
@@ -36,7 +43,7 @@ export function normalizeSandboxToolParams(
       changed = true;
     }
     if (typeof normalized.workdir === "string") {
-      const mapped = mapHostWorkspacePath(normalized.workdir, hostWorkspace, containerWorkspace);
+      const mapped = mapWorkspacePath(normalized.workdir, hostWorkspace, containerAliases, containerWorkspace);
       if (mapped !== normalized.workdir) {
         normalized.workdir = mapped;
         changed = true;
@@ -50,25 +57,38 @@ export function normalizeSandboxToolParams(
 function rewritePathFields(
   value: Record<string, unknown>,
   hostWorkspace: string,
+  containerAliases: string[],
   targetWorkspace: string | null,
   markChanged: (changed: boolean) => void
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
     if (typeof item === "string" && isPathLikeKey(key)) {
-      const mapped = mapHostWorkspacePath(item, hostWorkspace, targetWorkspace);
+      const mapped = mapWorkspacePath(item, hostWorkspace, containerAliases, targetWorkspace);
       out[key] = mapped;
       markChanged(mapped !== item);
       continue;
     }
     if (isPlainRecord(item)) {
-      out[key] = rewritePathFields(item as Record<string, unknown>, hostWorkspace, targetWorkspace, markChanged);
+      out[key] = rewritePathFields(
+        item as Record<string, unknown>,
+        hostWorkspace,
+        containerAliases,
+        targetWorkspace,
+        markChanged
+      );
       continue;
     }
     if (Array.isArray(item)) {
       out[key] = item.map((entry) => {
         if (isPlainRecord(entry)) {
-          return rewritePathFields(entry as Record<string, unknown>, hostWorkspace, targetWorkspace, markChanged);
+          return rewritePathFields(
+            entry as Record<string, unknown>,
+            hostWorkspace,
+            containerAliases,
+            targetWorkspace,
+            markChanged
+          );
         }
         return entry;
       });
@@ -96,14 +116,33 @@ function isPathLikeKey(key: string): boolean {
   ].includes(normalized);
 }
 
-function mapHostWorkspacePath(value: string, hostWorkspace: string, targetWorkspace: string | null): string {
+function mapWorkspacePath(
+  value: string,
+  hostWorkspace: string,
+  containerAliases: string[],
+  targetWorkspace: string | null
+): string {
   const normalized = normalizePathString(value);
   if (normalized === hostWorkspace) return targetWorkspace ?? ".";
   if (normalized.startsWith(`${hostWorkspace}/`)) {
     const suffix = normalized.slice(hostWorkspace.length + 1);
     return targetWorkspace === null ? suffix : `${targetWorkspace}/${suffix}`;
   }
+  for (const alias of containerAliases) {
+    if (normalized === alias) return targetWorkspace ?? ".";
+    if (normalized.startsWith(`${alias}/`)) {
+      const suffix = normalized.slice(alias.length + 1);
+      return targetWorkspace === null ? suffix : `${targetWorkspace}/${suffix}`;
+    }
+  }
   return value;
+}
+
+function containerWorkspaceAliases(hostWorkspace: string, containerWorkspace: string): string[] {
+  const aliases = [containerWorkspace];
+  const hostBasename = hostWorkspace.split("/").filter(Boolean).at(-1);
+  if (hostBasename !== undefined) aliases.push(`${containerWorkspace}/${hostBasename}`);
+  return [...new Set(aliases)].sort((left, right) => right.length - left.length);
 }
 
 function usesContainerWorkspace(toolName: string): boolean {

@@ -37,6 +37,9 @@ cd packages/openclaw-plugin && npm test && npm run typecheck
 
 - Live SWE-Rebench Docker task execution requires Docker access, real task
   images, and a valid upstream LLM key/model configuration.
+- `cd packages/openclaw-plugin && npm test` cannot run directly from this
+  Windows PowerShell sandbox because `npm.ps1` is blocked by execution policy;
+  use `npm.cmd test` instead.
 - `cd swe_rebench/bundle/plugin && npm.cmd run build` could not run in this
   Windows workspace because the bundled plugin does not have a local `tsc`
   executable installed.  The current bundled `dist` was validated with
