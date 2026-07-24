@@ -229,7 +229,7 @@ def _upstream_url(config: SchedulerConfig, path: str) -> str | None:
     if not config.llm_proxy_enabled or not config.llm_proxy_upstream_base_url:
         return None
     base = config.llm_proxy_upstream_base_url.rstrip("/")
-    if path.startswith("/v1/"):
+    if path.startswith("/v1/") and base.endswith("/v1"):
         suffix = path[len("/v1") :]
     else:
         suffix = path
