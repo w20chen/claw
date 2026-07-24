@@ -184,6 +184,16 @@ def _task_artifacts(trace_dir: Path | None) -> dict[str, Any]:
         if name in {"agent-cwd.txt", "agent-stdout.txt", "agent-stderr.txt", "repo_status.txt"}:
             item["preview"] = _preview_text(path)
         result[name] = item
+    proxy_debug = sorted(trace_dir.glob("llm_proxy_debug_*.json"))
+    if proxy_debug:
+        result["llm_proxy_debug"] = [
+            {
+                "path": str(path),
+                "bytes": path.stat().st_size,
+                "preview": _preview_text(path),
+            }
+            for path in proxy_debug[-3:]
+        ]
     return result
 
 

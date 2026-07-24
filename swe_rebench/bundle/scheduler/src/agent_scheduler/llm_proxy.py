@@ -151,6 +151,7 @@ async def _stream_chat(
     chunks: list[dict[str, Any]] = []
     status_code = 200
     error: str | None = None
+    raw_preview = bytearray()
     # Buffer for SSE data that may span across HTTP chunk boundaries.
     # httpx's aiter_bytes() does not guarantee SSE-event-aligned chunks.
     sse_buffer = b""
@@ -159,6 +160,7 @@ async def _stream_chat(
             async with client.stream("POST", upstream, headers=headers, content=body) as response:
                 status_code = response.status_code
                 async for chunk in response.aiter_bytes():
+                    _append_preview(raw_preview, chunk)
                     sse_buffer += chunk
                     # Extract complete SSE events (delimited by double-newline).
                     events, sse_buffer = _parse_sse_buffer(sse_buffer)
@@ -184,16 +186,29 @@ async def _stream_chat(
             "utf-8"
         )
     finally:
-            _record_proxy_trace(
-                trace_writer,
-                action_id=action_id,
-                payload=payload,
-                response_payload={"message": _message_from_stream_chunks(chunks)},
-                started_at=started_at,
-                status_code=status_code,
-                stream=True,
-                error=error if error else (None if status_code < 400 else f"upstream_http_{status_code}"),
-            )
+        message = _message_from_stream_chunks(chunks)
+        effective_error = error if error else (None if status_code < 400 else f"upstream_http_{status_code}")
+        _write_proxy_debug(
+            config,
+            action_id=action_id,
+            upstream=upstream,
+            payload=payload,
+            status_code=status_code,
+            chunk_count=len(chunks),
+            message=message,
+            raw_preview=bytes(raw_preview),
+            error=effective_error,
+        )
+        _record_proxy_trace(
+            trace_writer,
+            action_id=action_id,
+            payload=payload,
+            response_payload={"message": message},
+            started_at=started_at,
+            status_code=status_code,
+            stream=True,
+            error=effective_error,
+        )
 
 
 def _record_proxy_trace(
@@ -234,6 +249,46 @@ def _upstream_url(config: SchedulerConfig, path: str) -> str | None:
     else:
         suffix = path
     return base + suffix
+
+
+def _append_preview(buffer: bytearray, chunk: bytes, limit: int = 8192) -> None:
+    remaining = limit - len(buffer)
+    if remaining <= 0:
+        return
+    buffer.extend(chunk[:remaining])
+
+
+def _write_proxy_debug(
+    config: SchedulerConfig,
+    *,
+    action_id: str,
+    upstream: str,
+    payload: dict[str, Any],
+    status_code: int,
+    chunk_count: int,
+    message: dict[str, Any],
+    raw_preview: bytes,
+    error: str | None,
+) -> None:
+    try:
+        config.trace_dir.mkdir(parents=True, exist_ok=True)
+        path = config.trace_dir / f"llm_proxy_debug_{action_id}.json"
+        body = {
+            "action_id": action_id,
+            "upstream": upstream,
+            "request_model": payload.get("model"),
+            "request_stream": payload.get("stream"),
+            "status_code": status_code,
+            "chunk_count": chunk_count,
+            "message_content_bytes": len(str(message.get("content") or "").encode("utf-8")),
+            "has_tool_calls": bool(message.get("tool_calls")),
+            "finish_reason": message.get("finish_reason"),
+            "error": error,
+            "raw_preview": raw_preview.decode("utf-8", errors="replace"),
+        }
+        path.write_text(json.dumps(body, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    except OSError:
+        return
 
 
 def _translate_model(payload: dict[str, Any], config: SchedulerConfig) -> None:
