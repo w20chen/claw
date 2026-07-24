@@ -16,6 +16,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -81,6 +82,7 @@ def build_bundle(config: RunnerConfig) -> Path:
         _remove_tree(bundle_dir)
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
+    _build_plugin_dist(repo, bundle_dir, config)
     _copy_plugin(repo, bundle_dir, config)
     _copy_scheduler(repo, bundle_dir, config)
     _copy_tool_profiles(repo, bundle_dir, config)
@@ -93,6 +95,74 @@ def build_bundle(config: RunnerConfig) -> Path:
     _log(f"  plugin/     <- {repo / config.bundle.plugin_source}")
     _log(f"  scheduler/  <- {repo / config.bundle.scheduler_source}")
     return bundle_dir
+
+
+def bundle_needs_rebuild(config: RunnerConfig, bundle_dir: Path | None = None) -> bool:
+    repo = config.repo_root
+    bundle = bundle_dir or repo / config.bundle.output_dir
+    marker = bundle / "entrypoint.sh"
+    if not marker.exists():
+        return True
+
+    marker_mtime = marker.stat().st_mtime
+    sources = [
+        repo / config.bundle.plugin_source,
+        repo / config.bundle.scheduler_source,
+        repo / config.bundle.tool_profiles,
+        Path(__file__).resolve(),
+    ]
+    for source in sources:
+        if source.exists() and _latest_source_mtime(source) > marker_mtime:
+            return True
+    return False
+
+
+def _build_plugin_dist(repo: Path, bundle_dir: Path, config: RunnerConfig) -> None:
+    """Rebuild ignored plugin JS so git resets cannot leave stale runtime code."""
+    plugin_dir = repo / config.bundle.plugin_source
+    package_json = plugin_dir / "package.json"
+    if not package_json.exists():
+        raise FileNotFoundError(f"plugin package.json not found: {package_json}")
+
+    dist_dir = plugin_dir / "dist"
+    if dist_dir.exists():
+        _remove_tree(dist_dir)
+
+    npm = shutil.which("npm") or shutil.which("npm.cmd")
+    if npm is None:
+        raise FileNotFoundError("required executable not found: npm")
+
+    log_path = bundle_dir / "plugin-build.log"
+    with log_path.open("w", encoding="utf-8") as log:
+        result = subprocess.run(
+            [npm, "run", "build"],
+            cwd=str(plugin_dir),
+            stdout=log,
+            stderr=log,
+            text=True,
+        )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"plugin_build_failed exit={result.returncode}: "
+            f"{_tail_text(log_path, 2000)}"
+        )
+    _log("  Rebuilt plugin dist")
+
+
+def _latest_source_mtime(path: Path) -> float:
+    if path.is_file():
+        return path.stat().st_mtime
+    latest = path.stat().st_mtime
+    skip = {"node_modules", ".git", "__pycache__", ".pytest_cache", ".ruff_cache", "dist"}
+    for item in path.rglob("*"):
+        if any(part in skip for part in item.parts):
+            continue
+        try:
+            mtime = item.stat().st_mtime
+        except OSError:
+            continue
+        latest = max(latest, mtime)
+    return latest
 
 
 def _copy_plugin(repo: Path, bundle_dir: Path, config: RunnerConfig) -> None:
@@ -627,6 +697,14 @@ def _remove_tree(path: Path) -> None:
 
 def _count_files(directory: Path) -> int:
     return sum(1 for _ in directory.rglob("*") if _.is_file())
+
+
+def _tail_text(path: Path, max_chars: int) -> str:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return f"cannot read log: {exc}"
+    return text[-max_chars:]
 
 
 def _log(msg: str) -> None:

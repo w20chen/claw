@@ -45,7 +45,7 @@ from typing import Any
 from swe_rebench.config import RunnerConfig
 from swe_rebench.docker import ContainerResult, get_docker_client, pull_image, run_container
 from swe_rebench.host_sandbox import run_host_sandbox_task
-from swe_rebench.prepare import build_bundle
+from swe_rebench.prepare import build_bundle, bundle_needs_rebuild
 from swe_rebench.task_source import (
     TaskDef,
     create_single_task,
@@ -752,9 +752,13 @@ def main() -> None:
         if args.runtime_mode is not None:
             config.runtime.mode = args.runtime_mode
 
-        # Build bundle if requested
+        # Build bundle if requested or stale.  The plugin runtime lives in
+        # ignored dist/ files, so relying on git reset alone is not enough.
         bundle_dir = repo_root / config.bundle.output_dir
-        if args.do_prepare or not bundle_dir.exists():
+        should_prepare = args.do_prepare or (
+            not args.dry_run and bundle_needs_rebuild(config, bundle_dir)
+        )
+        if should_prepare:
             _log("Preparing runtime bundle...")
             build_bundle(config)
 

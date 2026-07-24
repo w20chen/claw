@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -19,7 +20,13 @@ from swe_rebench.host_sandbox import (
 )
 from swe_rebench.task_source import TaskDef
 from swe_rebench.docker import run_container
-from swe_rebench.prepare import _ENTRYPOINT_TEMPLATE, _PLUGIN_CONFIG, _write_entrypoint
+from swe_rebench.prepare import (
+    _ENTRYPOINT_TEMPLATE,
+    _PLUGIN_CONFIG,
+    _build_plugin_dist,
+    _write_entrypoint,
+    bundle_needs_rebuild,
+)
 from swe_rebench.task_source import filter_tasks, parse_instance_ids, tasks_from_records
 from swe_rebench.runner import (
     _inspect_trace,
@@ -943,3 +950,78 @@ bundle:
     _write_entrypoint(bundle_dir, config)
 
     assert "sk-secret" not in (bundle_dir / "entrypoint.sh").read_text(encoding="utf-8")
+
+
+def test_prepare_rebuilds_plugin_dist_after_removing_stale_files(monkeypatch, tmp_path: Path) -> None:
+    plugin_dir = tmp_path / "packages" / "openclaw-plugin"
+    dist_dir = plugin_dir / "dist"
+    dist_dir.mkdir(parents=True)
+    (plugin_dir / "package.json").write_text('{"scripts":{"build":"tsc"}}\n', encoding="utf-8")
+    (dist_dir / "stale.js").write_text("old runtime\n", encoding="utf-8")
+    bundle_dir = tmp_path / "bundle"
+    bundle_dir.mkdir()
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("", encoding="utf-8")
+    config = RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
+    calls: list[list[str]] = []
+
+    class Result:
+        returncode = 0
+
+    def fake_which(name: str):
+        return "/usr/bin/npm" if name == "npm" else None
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        assert kwargs["cwd"] == str(plugin_dir)
+        dist_dir.mkdir()
+        (dist_dir / "index.js").write_text("fresh runtime\n", encoding="utf-8")
+        return Result()
+
+    monkeypatch.setattr("swe_rebench.prepare.shutil.which", fake_which)
+    monkeypatch.setattr("swe_rebench.prepare.subprocess.run", fake_run)
+
+    _build_plugin_dist(tmp_path, bundle_dir, config)
+
+    assert calls == [["/usr/bin/npm", "run", "build"]]
+    assert not (dist_dir / "stale.js").exists()
+    assert (dist_dir / "index.js").read_text(encoding="utf-8") == "fresh runtime\n"
+    assert (bundle_dir / "plugin-build.log").exists()
+
+
+def test_bundle_stale_check_ignores_dist_but_tracks_source(tmp_path: Path) -> None:
+    plugin_dir = tmp_path / "packages" / "openclaw-plugin"
+    scheduler_dir = tmp_path / "services" / "scheduler"
+    profiles = tmp_path / "examples" / "tool-profiles.example.json"
+    bundle_dir = tmp_path / "bundle"
+    (plugin_dir / "src").mkdir(parents=True)
+    (plugin_dir / "dist").mkdir()
+    scheduler_dir.mkdir(parents=True)
+    profiles.parent.mkdir(parents=True)
+    bundle_dir.mkdir()
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("", encoding="utf-8")
+    config = RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
+
+    marker = bundle_dir / "entrypoint.sh"
+    marker.write_text("built\n", encoding="utf-8")
+    future = marker.stat().st_mtime + 1000
+    os.utime(marker, (future, future))
+    now = marker.stat().st_mtime
+    old = now - 100
+    for path in (
+        plugin_dir / "src" / "index.ts",
+        plugin_dir / "dist" / "index.js",
+        scheduler_dir / "pyproject.toml",
+        profiles,
+    ):
+        path.write_text("old\n", encoding="utf-8")
+        os.utime(path, (old, old))
+
+    assert bundle_needs_rebuild(config, bundle_dir) is False
+
+    source = plugin_dir / "src" / "index.ts"
+    new = now + 100
+    os.utime(source, (new, new))
+
+    assert bundle_needs_rebuild(config, bundle_dir) is True
