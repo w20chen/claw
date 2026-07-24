@@ -7,6 +7,7 @@ create containers with volume mounts, wait for completion, and clean up.
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from dataclasses import dataclass, field
@@ -14,6 +15,19 @@ from pathlib import Path
 from typing import Any
 
 from swe_rebench.config import DockerConfig
+
+
+def _docker_host_socket(host: str) -> str | None:
+    """Extract a Unix socket path from a Docker host URL.
+
+    Returns ``None`` if the host is not a Unix socket (e.g. TCP).
+    """
+    if host.startswith("unix://"):
+        return host[len("unix://"):]
+    # Also handle plain paths used by some Docker clients.
+    if host.startswith("/") and not host.startswith(("tcp://", "npipe://", "fd://")):
+        return host
+    return None
 
 
 @dataclass
@@ -130,6 +144,9 @@ def run_container(
         "OPENCLAW_MODEL_REF": openclaw_model_ref,
         "CLAW_CGROUP_REQUIRED": "1",
         "CLAW_CGROUP_ROOT": "/sys/fs/cgroup/claw",
+        # Enable DockerExecObserver so read/write/edit tools get
+        # independent PID/cgroup attribution via docker-exec events.
+        "AGENT_SCHEDULER_DOCKER_EXEC_OBSERVER": "true",
     }
     if env_extra:
         environment.update(env_extra)
@@ -138,6 +155,12 @@ def run_container(
         str(bundle_dir.resolve()): {"bind": "/claw", "mode": "ro"},
         str(trace_dir.resolve()): {"bind": "/traces", "mode": "rw"},
     }
+    # Mount Docker socket so OpenClaw can use Docker sandbox and
+    # the sidecar's DockerExecObserver can watch exec events.
+    # Derive the socket path from the configured Docker host.
+    _host_socket = _docker_host_socket(config.host)
+    if _host_socket is not None and os.path.exists(_host_socket):
+        volumes[_host_socket] = {"bind": "/var/run/docker.sock", "mode": "rw"}
     if config.cgroup_mount_rw:
         volumes["/sys/fs/cgroup"] = {"bind": "/sys/fs/cgroup", "mode": "rw"}
 
