@@ -83,6 +83,7 @@ class BatchReport:
 
 def _result_dict(r: ContainerResult) -> dict[str, Any]:
     trace_inspection = [_inspect_trace(tf, r.task_id) for tf in r.trace_files]
+    resource_summary = _resource_summary(trace_inspection)
     artifacts = _task_artifacts(r.trace_dir)
     smoke = _smoke_summary(artifacts)
     return {
@@ -94,6 +95,7 @@ def _result_dict(r: ContainerResult) -> dict[str, Any]:
         "trace_files": [str(tf) for tf in r.trace_files],
         "trace_lines": sum(_count_lines(tf) for tf in r.trace_files),
         "trace_inspection": trace_inspection,
+        "resource_summary": resource_summary,
         "artifacts": artifacts,
         "smoke": smoke,
         "duration_seconds": round(r.duration_seconds, 1),
@@ -119,6 +121,9 @@ def _inspect_trace(path: Path, task_id: str) -> dict[str, Any]:
         "tool_span_ends": 0,
         "launcher_tool_span_ends": 0,
         "unattributed_launcher_tool_span_ends": 0,
+        "cgroup_tool_span_ends": 0,
+        "process_tree_tool_span_ends": 0,
+        "attributed_tool_span_ends": 0,
         "failed_tool_span_ends": 0,
         "warnings": [],
     }
@@ -150,6 +155,13 @@ def _inspect_trace(path: Path, task_id: str) -> dict[str, Any]:
                 report["tool_span_ends"] += 1
                 status_code = _nested_get(record, ("status", "code"))
                 output_exit_code = _extract_trace_exit_code(record.get("output"))
+                resources = record.get("resources") if isinstance(record.get("resources"), dict) else {}
+                if resources.get("scope") == "cgroup":
+                    report["cgroup_tool_span_ends"] += 1
+                if resources.get("scope") == "process_tree":
+                    report["process_tree_tool_span_ends"] += 1
+                if resources.get("attribution_status") in {"attributed", "partially_attributed"}:
+                    report["attributed_tool_span_ends"] += 1
                 if status_code == "ok" and output_exit_code not in (None, 0):
                     report["failed_tool_span_ends"] += 1
                 if _nested_get(record, ("execution", "mode")) == "launcher":
@@ -167,9 +179,34 @@ def _inspect_trace(path: Path, task_id: str) -> dict[str, Any]:
         report["launcher_tool_span_ends"] == report["unattributed_launcher_tool_span_ends"]
     ):
         report["warnings"].append("launcher tool spans have no resource attribution")
+    if report["launcher_tool_span_ends"] and not report["cgroup_tool_span_ends"]:
+        report["warnings"].append("launcher tool spans have no cgroup resource samples")
     if report["failed_tool_span_ends"]:
         report["warnings"].append("tool span status disagrees with non-zero exit code")
     return report
+
+
+def _resource_summary(trace_inspection: list[dict[str, Any]]) -> dict[str, Any]:
+    tool_span_ends = sum(int(item.get("tool_span_ends", 0)) for item in trace_inspection)
+    launcher_tool_span_ends = sum(int(item.get("launcher_tool_span_ends", 0)) for item in trace_inspection)
+    attributed_tool_span_ends = sum(int(item.get("attributed_tool_span_ends", 0)) for item in trace_inspection)
+    cgroup_tool_span_ends = sum(int(item.get("cgroup_tool_span_ends", 0)) for item in trace_inspection)
+    unattributed_launcher_tool_span_ends = sum(
+        int(item.get("unattributed_launcher_tool_span_ends", 0))
+        for item in trace_inspection
+    )
+    return {
+        "tool_span_ends": tool_span_ends,
+        "launcher_tool_span_ends": launcher_tool_span_ends,
+        "attributed_tool_span_ends": attributed_tool_span_ends,
+        "cgroup_tool_span_ends": cgroup_tool_span_ends,
+        "unattributed_launcher_tool_span_ends": unattributed_launcher_tool_span_ends,
+        "cgroup_coverage_ratio": (
+            round(cgroup_tool_span_ends / launcher_tool_span_ends, 3)
+            if launcher_tool_span_ends
+            else None
+        ),
+    }
 
 
 def _nested_get(value: dict[str, Any], keys: tuple[str, ...]) -> Any:
@@ -217,6 +254,7 @@ def _task_artifacts(trace_dir: Path | None) -> dict[str, Any]:
         "repo_status.txt",
         "model.patch",
         "result_summary.json",
+        "cgroup_probe.json",
         "phase3.log",
     ):
         path = trace_dir / name

@@ -9,14 +9,17 @@ from swe_rebench.host_sandbox import (
     _ensure_openclaw_sandbox_image,
     _openclaw_config,
     _openclaw_env,
+    _run_openclaw_agent,
     _reset_directory,
     _write_task_inputs,
 )
 from swe_rebench.task_source import TaskDef
+from swe_rebench.docker import run_container
 from swe_rebench.prepare import _ENTRYPOINT_TEMPLATE, _PLUGIN_CONFIG, _write_entrypoint
 from swe_rebench.task_source import filter_tasks, parse_instance_ids, tasks_from_records
 from swe_rebench.runner import (
     _inspect_trace,
+    _resource_summary,
     _run_one,
     _require_llm_api_key,
     _reset_task_trace_dir,
@@ -210,6 +213,40 @@ def test_inspect_trace_warns_when_launcher_spans_are_unattributed(tmp_path: Path
     assert report["launcher_tool_span_ends"] == 1
     assert report["unattributed_launcher_tool_span_ends"] == 1
     assert "launcher tool spans have no resource attribution" in report["warnings"]
+    assert "launcher tool spans have no cgroup resource samples" in report["warnings"]
+
+
+def test_inspect_trace_summarizes_cgroup_resource_coverage(tmp_path: Path) -> None:
+    trace_path = tmp_path / "trace.jsonl"
+    trace_path.write_text(
+        json.dumps({"record_type": "trace_metadata", "trace_format_version": 6})
+        + "\n"
+        + json.dumps(
+            {
+                "record_type": "span_end",
+                "kind": "tool",
+                "name": "exec",
+                "execution": {"mode": "launcher", "cgroup_path": "/sys/fs/cgroup/claw/exec-1"},
+                "resources": {
+                    "attribution_status": "attributed",
+                    "scope": "cgroup",
+                },
+                "status": {"code": "ok"},
+                "output": {"exit_code": 0},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = _inspect_trace(trace_path, "")
+    summary = _resource_summary([report])
+
+    assert report["cgroup_tool_span_ends"] == 1
+    assert report["attributed_tool_span_ends"] == 1
+    assert "launcher tool spans have no cgroup resource samples" not in report["warnings"]
+    assert summary["cgroup_tool_span_ends"] == 1
+    assert summary["cgroup_coverage_ratio"] == 1.0
 
 
 def test_inspect_trace_warns_when_ok_status_has_failed_exit_code(tmp_path: Path) -> None:
@@ -270,6 +307,7 @@ def test_entrypoint_uses_runtime_llm_env_and_writes_task_manifest() -> None:
     assert 'agent-stdout.txt' in _ENTRYPOINT_TEMPLATE
     assert 'model.patch' in _ENTRYPOINT_TEMPLATE
     assert 'result_summary.json' in _ENTRYPOINT_TEMPLATE
+    assert 'cgroup_probe.json' in _ENTRYPOINT_TEMPLATE
 
 
 def test_swe_rebench_plugin_config_uses_managed_wrapper_cgroup() -> None:
@@ -423,6 +461,53 @@ def test_host_sandbox_prompt_uses_relative_paths(tmp_path: Path) -> None:
 
     assert "Use relative paths" in prompt
     assert "repository mounted at /workspace" not in prompt
+
+
+def test_host_sandbox_agent_forces_sandbox_exec_workdir(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("", encoding="utf-8")
+    config = RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
+    trace_dir = tmp_path / "trace"
+    trace_dir.mkdir()
+    openclaw_home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    task = TaskDef(instance_id="task-1", image="image:latest", problem_statement="fix")
+    captured: dict[str, object] = {}
+
+    class FakeProcess:
+        pid = 123
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            pass
+
+    def fake_popen(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        captured["cwd"] = kwargs["cwd"]
+        captured["env"] = kwargs["env"]
+        return FakeProcess()
+
+    monkeypatch.setattr("swe_rebench.host_sandbox._require_executable", lambda name: "/usr/bin/openclaw")
+    monkeypatch.setattr("swe_rebench.host_sandbox.subprocess.Popen", fake_popen)
+
+    exit_code = _run_openclaw_agent(
+        trace_dir=trace_dir,
+        openclaw_home=openclaw_home,
+        workspace=workspace,
+        sidecar_port=8765,
+        task=task,
+        config=config,
+    )
+
+    assert exit_code == 0
+    assert captured["cwd"] == str(tmp_path)
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert env["OPENCLAW_WORKSPACE_DIR"] == str(workspace)
+    assert env["CLAW_EXEC_WORKDIR"] == "/workspace"
 
 
 def test_host_sandbox_builds_default_sandbox_image_when_missing(monkeypatch, tmp_path: Path) -> None:
@@ -609,6 +694,45 @@ llm:
     config = RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
 
     assert config.llm.api_key == "sk-real-from-env"
+
+
+def test_docker_cli_uses_wait_exit_code_with_rm_container(monkeypatch, tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+
+    class Result:
+        def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = "") -> None:
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        if cmd[:3] == ["docker", "run", "--rm"]:
+            return Result(stdout="abc123\n")
+        if cmd == ["docker", "wait", "abc123"]:
+            return Result(stdout="7\n")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("", encoding="utf-8")
+    config = RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
+
+    result = run_container(
+        client=None,
+        image="image:latest",
+        task_id="task-1",
+        bundle_dir=tmp_path,
+        trace_dir=tmp_path / "trace",
+        problem_statement="fix",
+        config=config.docker,
+        llm_api_key="sk-test",
+        llm_upstream_url="https://example.invalid",
+        timeout_seconds=10,
+    )
+
+    assert result.exit_code == 7
+    assert not any(call[:2] == ["docker", "inspect"] for call in calls)
 
 
 def test_require_llm_api_key_reports_default_file(tmp_path: Path, monkeypatch) -> None:

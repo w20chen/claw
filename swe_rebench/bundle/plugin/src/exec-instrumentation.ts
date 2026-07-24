@@ -59,6 +59,10 @@ export async function instrumentExecParams(
   const executionId = extractString(event, ["tool_call_id", "toolCallId", "id"]) ?? `exec-${randomUUID()}`;
   const runId = payload.run_id ?? extractString(context, ["runId", "run_id"]);
   const sessionKeyHash = payload.session_key === null ? null : stableDigest(payload.session_key);
+  const workdirOverride = launcherWorkdirOverride();
+  if (workdirOverride !== null) {
+    params.workdir = workdirOverride;
+  }
   let token: string | null = null;
 
   try {
@@ -184,6 +188,7 @@ function safeExecEnv(value: unknown): Record<string, unknown> {
 function launcherEnv(): Record<string, string> {
   const output: Record<string, string> = {};
   for (const key of [
+    "CLAW_EXEC_WORKDIR",
     "CLAW_CGROUP_ROOT",
     "CLAW_CGROUP_PATH",
     "CLAW_CGROUP_REQUIRED",
@@ -195,6 +200,11 @@ function launcherEnv(): Record<string, string> {
     if (typeof value === "string" && value.length > 0) output[key] = value;
   }
   return output;
+}
+
+function launcherWorkdirOverride(): string | null {
+  const value = process.env.CLAW_EXEC_WORKDIR;
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function shellQuote(value: string): string {

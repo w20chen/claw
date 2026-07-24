@@ -191,13 +191,15 @@ def _run_container_sdk(
         try:
             result = container.wait(timeout=timeout_seconds if timeout_seconds > 0 else None)
             exit_code = result.get("StatusCode", -1)
+            error = None
         except (docker.errors.APIError, Exception) as exc:
             _log(f"[{task_id}] wait error: {exc}")
             try:
                 container.kill()
             except Exception:
                 pass
-            exit_code = -1
+            exit_code = 124
+            error = f"container_timeout_or_wait_failed: {exc}"
         finally:
             try:
                 container.remove(force=True)
@@ -217,7 +219,7 @@ def _run_container_sdk(
     trace_files = _find_traces(trace_dir)
     return ContainerResult(
         task_id=task_id, image=image, exit_code=exit_code,
-        trace_dir=trace_dir, trace_files=trace_files,
+        error=error, trace_dir=trace_dir, trace_files=trace_files,
         duration_seconds=duration, container_id=container_id,
     )
 
@@ -279,24 +281,36 @@ def _run_container_cli(
         container_id = result.stdout.strip()
         _log(f"[{task_id}] container {container_id[:12]} started (CLI fallback)")
 
-        # Wait for container
+        # Wait for container.  Because the container was started with --rm,
+        # docker wait is the reliable source of the exit code; inspect may
+        # race with auto-removal after the process exits.
         wait_cmd = ["docker", "wait", container_id]
+        wait_result: subprocess.CompletedProcess[str]
         if timeout_seconds > 0:
             try:
-                subprocess.run(wait_cmd, check=True, timeout=timeout_seconds)
+                wait_result = subprocess.run(
+                    wait_cmd,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=timeout_seconds,
+                )
             except subprocess.TimeoutExpired:
                 _log(f"[{task_id}] timeout, killing container")
                 subprocess.run(["docker", "kill", container_id], capture_output=True)
-                subprocess.run(["docker", "wait", container_id], capture_output=True)
+                subprocess.run(["docker", "wait", container_id], capture_output=True, text=True)
+                duration = time.monotonic() - started
+                return ContainerResult(
+                    task_id=task_id, image=image, exit_code=124,
+                    error=f"container timed out after {timeout_seconds}s",
+                    trace_dir=trace_dir,
+                    trace_files=_find_traces(trace_dir),
+                    duration_seconds=duration,
+                    container_id=container_id,
+                )
         else:
-            subprocess.run(wait_cmd, check=True)
-
-        # Get exit code
-        inspect = subprocess.run(
-            ["docker", "inspect", "-f", "{{.State.ExitCode}}", container_id],
-            capture_output=True, text=True, check=True,
-        )
-        exit_code = int(inspect.stdout.strip())
+            wait_result = subprocess.run(wait_cmd, capture_output=True, text=True, check=True)
+        exit_code = int(wait_result.stdout.strip())
 
     except subprocess.CalledProcessError as exc:
         _log(f"[{task_id}] CLI error: {exc}")

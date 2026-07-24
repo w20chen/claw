@@ -173,6 +173,37 @@ test("exec instrumentation forwards launcher cgroup environment", async () => {
   }
 });
 
+test("exec instrumentation can force sandbox workdir from environment", async () => {
+  const previous = process.env.CLAW_EXEC_WORKDIR;
+  process.env.CLAW_EXEC_WORKDIR = "/workspace";
+  const seen = [];
+  const client = {
+    async registerExecution(request) {
+      seen.push(request);
+      return {one_time_token: "token-1"};
+    }
+  };
+  const event = {
+    toolName: "exec",
+    toolCallId: "call-1",
+    params: {command: "pwd", workdir: "/home/user/project"}
+  };
+
+  try {
+    const result = await instrumentExecParams(event, {}, payload, decision, client, baseConfig);
+
+    assert.equal(result.params.workdir, "/workspace");
+    assert.equal(result.params.env.CLAW_EXEC_WORKDIR, "/workspace");
+    assert.equal(seen[0].workdir, "/workspace");
+  } finally {
+    if (previous === undefined) {
+      delete process.env.CLAW_EXEC_WORKDIR;
+    } else {
+      process.env.CLAW_EXEC_WORKDIR = previous;
+    }
+  }
+});
+
 test("managed-wrapper rewrites command to launcher token only", async () => {
   const client = {
     async registerExecution() {

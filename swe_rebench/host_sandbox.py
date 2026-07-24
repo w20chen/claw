@@ -301,6 +301,7 @@ def _run_openclaw_agent(
         {
             "TASK_INSTANCE_ID": task.instance_id,
             "CLAW_SCHEDULER_ENDPOINT": f"http://host.docker.internal:{sidecar_port}",
+            "CLAW_EXEC_WORKDIR": "/workspace",
             "CLAW_ENABLE_CGROUP": "1",
             "CLAW_LAUNCH_DEBUG": "1",
         }
@@ -335,7 +336,7 @@ def _run_openclaw_agent(
             str(prompt_path),
             *config.agent.extra_args,
         ],
-        cwd=str(workspace),
+        cwd=str(config.repo_root),
         env=env,
         stdout=stdout,
         stderr=stderr,

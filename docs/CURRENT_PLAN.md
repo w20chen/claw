@@ -37,3 +37,10 @@ cd packages/openclaw-plugin && npm test && npm run typecheck
 
 - Live SWE-Rebench Docker task execution requires Docker access, real task
   images, and a valid upstream LLM key/model configuration.
+- `cd swe_rebench/bundle/plugin && npm.cmd run build` could not run in this
+  Windows workspace because the bundled plugin does not have a local `tsc`
+  executable installed.  The current bundled `dist` was validated with
+  `node --test test/*.test.mjs`.
+- `python -m mypy .` currently fails on pre-existing repository-wide typing
+  issues, including missing `types-setuptools`, Windows/POSIX launcher
+  attribute checks, and trace helper union-attr errors.

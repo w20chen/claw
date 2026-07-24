@@ -164,6 +164,35 @@ export AGENT_SCHEDULER_LLM_PROXY_EXPOSE_MODEL="${LLM_MODEL:-__MODEL_SHORT__}"
 export AGENT_SCHEDULER_LLM_PROXY_UPSTREAM_MODEL="${LLM_MODEL:-__MODEL_SHORT__}"
 export AGENT_SCHEDULER_POLICY="observe-only"
 export AGENT_SCHEDULER_TOOL_PROFILES="$CLAW_ROOT/tool_profiles.json"
+mkdir -p "$TRACE_DIR"
+$_CLW_PYTHON - <<'PY' > "$TRACE_DIR/cgroup_probe.json" 2>/dev/null || true
+import json
+import os
+from pathlib import Path
+
+root = Path(os.environ.get("CLAW_CGROUP_ROOT") or "/sys/fs/cgroup/claw")
+mount = Path("/sys/fs/cgroup")
+self_path = None
+try:
+    for line in Path("/proc/self/cgroup").read_text(encoding="utf-8").splitlines():
+        if line.startswith("0::"):
+            value = line[3:]
+            self_path = "/sys/fs/cgroup" if value in {"", "/"} else f"/sys/fs/cgroup{value}"
+            break
+except OSError:
+    pass
+probe = {
+    "cgroup_required": os.environ.get("CLAW_CGROUP_REQUIRED") == "1",
+    "cgroup_root": str(root),
+    "cgroup_root_exists": root.exists(),
+    "cgroup_root_parent_exists": root.parent.exists(),
+    "cgroup_root_parent_writable": os.access(root.parent, os.W_OK),
+    "cgroup_mount_exists": mount.exists(),
+    "cgroup_mount_writable": os.access(mount, os.W_OK),
+    "self_cgroup_path": self_path,
+}
+print(json.dumps(probe, indent=2))
+PY
 
 cd "$CLAW_ROOT/scheduler"
 
