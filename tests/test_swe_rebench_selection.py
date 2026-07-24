@@ -6,7 +6,7 @@ from pathlib import Path
 from swe_rebench.config import RunnerConfig
 from swe_rebench.prepare import _ENTRYPOINT_TEMPLATE, _write_entrypoint
 from swe_rebench.task_source import filter_tasks, parse_instance_ids, tasks_from_records
-from swe_rebench.runner import _inspect_trace, _smoke_summary, _task_artifacts
+from swe_rebench.runner import _inspect_trace, _reset_task_trace_dir, _smoke_summary, _task_artifacts
 
 
 def _records() -> list[dict[str, object]]:
@@ -196,6 +196,30 @@ def test_task_artifacts_summarizes_patch_and_result_summary(tmp_path: Path) -> N
     assert artifacts["agent-cwd.txt"]["preview"] == "/testbed\n"
     assert artifacts["agent-stdout.txt"]["preview"] == "done\n"
     assert artifacts["result_summary.json"]["summary"]["has_patch"] is True
+
+
+def test_reset_task_trace_dir_removes_stale_artifacts(tmp_path: Path) -> None:
+    trace_root = tmp_path / "traces"
+    trace_dir = trace_root / "task-a"
+    trace_dir.mkdir(parents=True)
+    (trace_dir / "model.patch").write_text("stale diff\n", encoding="utf-8")
+
+    _reset_task_trace_dir(trace_root, trace_dir)
+
+    assert trace_dir.is_dir()
+    assert not (trace_dir / "model.patch").exists()
+
+
+def test_reset_task_trace_dir_refuses_outside_trace_root(tmp_path: Path) -> None:
+    trace_root = tmp_path / "traces"
+    outside = tmp_path / "outside-task"
+
+    try:
+        _reset_task_trace_dir(trace_root, outside)
+    except ValueError as exc:
+        assert "outside trace root" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
 
 
 def test_smoke_summary_reports_no_patch_as_unsuccessful() -> None:

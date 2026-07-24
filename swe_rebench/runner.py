@@ -343,6 +343,7 @@ def _run_one(
     """Execute a single task container (called in worker thread)."""
     retries = config.batch.retry_failed + 1
     last_result: ContainerResult | None = None
+    _reset_task_trace_dir(config.output.trace_root, trace_dir)
 
     for attempt in range(1, retries + 1):
         if attempt > 1:
@@ -412,6 +413,19 @@ def _task_trace_dir(config: RunnerConfig, task: TaskDef) -> Path:
 
 
 # ── Trace export ──────────────────────────────────────────────────
+
+def _reset_task_trace_dir(trace_root: Path, trace_dir: Path) -> None:
+    """Remove stale per-task artifacts before a fresh run."""
+    root = trace_root.resolve()
+    target = trace_dir.resolve()
+
+    if target == root or root not in target.parents:
+        raise ValueError(f"refusing to clear trace directory outside trace root: {target}")
+
+    if target.exists():
+        shutil.rmtree(target)
+    target.mkdir(parents=True, exist_ok=True)
+
 
 def _export_traces(config: RunnerConfig, report: BatchReport) -> None:
     """Copy trace files into a flat export directory keyed by task ID."""
