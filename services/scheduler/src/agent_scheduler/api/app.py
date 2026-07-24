@@ -123,6 +123,10 @@ def create_app(state: AppState | None = None) -> FastAPI:
         _: None = Depends(auth),
     ) -> dict[str, bool]:
         s._sandbox_scope_override = scope
+        if s.docker_exec_observer is not None:
+            s.docker_exec_observer.update_container(
+                container_id=scope.container_id,
+            )
         return {"stored": True}
 
     @app.get("/v1/models")
@@ -147,6 +151,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
         s: AppState = Depends(get_state),
         _: None = Depends(auth),
     ):
+        original_request = request
         request = with_sandbox_fallback(request, s)
         start = time.monotonic()
         s.metrics.inc("scheduler_tool_requests_total")
@@ -158,6 +163,8 @@ def create_app(state: AppState | None = None) -> FastAPI:
             SchedulingContext(prediction=prediction, placement=PlacementAdvice()),
         )
         if decision.action == "allow":
+            if s.docker_exec_observer is not None:
+                s.docker_exec_observer.begin_tool(original_request)
             s.tool_monitor.begin(request, prediction.resource_class)
         s.metrics.inc("scheduler_tool_decisions_total")
         s.metrics.decision_latencies.append(time.monotonic() - start)
@@ -169,7 +176,16 @@ def create_app(state: AppState | None = None) -> FastAPI:
         s: AppState = Depends(get_state),
         _: None = Depends(auth),
     ) -> dict[str, bool]:
-        event = completed_with_sandbox_fallback(event, s)
+        inferred_scope = (
+            s.docker_exec_observer.infer_scope(event)
+            if s.docker_exec_observer is not None
+            else None
+        )
+        if inferred_scope is not None:
+            s.tool_monitor.bind_scope(event.tool_call_id, inferred_scope)
+            event = event.model_copy(update={"resource_scope": inferred_scope})
+        else:
+            event = completed_with_sandbox_fallback(event, s)
         # Dedup: reject duplicate tool completions (same event_id)
         if event.event_id in s._completed_tool_event_ids:
             return {"stored": False}

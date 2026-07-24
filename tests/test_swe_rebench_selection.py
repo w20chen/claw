@@ -14,6 +14,7 @@ from swe_rebench.host_sandbox import (
     _run_openclaw_agent,
     _reset_directory,
     _sandbox_container_prefix,
+    _start_sidecar,
     _write_task_inputs,
 )
 from swe_rebench.task_source import TaskDef
@@ -637,6 +638,44 @@ def test_host_sandbox_builds_plugin_before_install(monkeypatch, tmp_path: Path) 
 
     assert calls == [["/usr/bin/npm", "run", "build"]]
     assert (tmp_path / "trace" / "plugin-build.log").exists()
+
+
+def test_host_sandbox_sidecar_enables_docker_exec_observer(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("", encoding="utf-8")
+    config = RunnerConfig.from_yaml(config_path, repo_root=tmp_path)
+    workspace = tmp_path / "workspace"
+    trace_dir = tmp_path / "trace"
+    trace_dir.mkdir()
+    tool_profiles = tmp_path / "profiles.json"
+    captured: dict[str, object] = {}
+
+    class FakeProcess:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        captured["cwd"] = kwargs["cwd"]
+        captured["env"] = kwargs["env"]
+        return FakeProcess()
+
+    monkeypatch.setattr("swe_rebench.host_sandbox.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("swe_rebench.host_sandbox._wait_ready", lambda port: None)
+
+    process = _start_sidecar(
+        trace_dir=trace_dir,
+        port=8765,
+        config=config,
+        workspace=workspace,
+        tool_profiles=tool_profiles,
+    )
+
+    assert isinstance(process, FakeProcess)
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert env["AGENT_SCHEDULER_DOCKER_EXEC_OBSERVER"] == "true"
+    assert env["AGENT_SCHEDULER_DOCKER_EXEC_CONTAINER_PREFIX"] == _sandbox_container_prefix(workspace)
 
 
 def test_host_sandbox_cleans_only_untracked_runtime_artifacts(monkeypatch, tmp_path: Path) -> None:
